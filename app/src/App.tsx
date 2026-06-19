@@ -25,11 +25,12 @@ export default function App() {
   const localPosRef = useRef({ x: 100, y: 100 });
 
   useEffect(() => {
-    const savedId = localStorage.getItem("hs_userId");
+    const savedId = sessionStorage.getItem("hs_sessionId");
     const savedName = localStorage.getItem("hs_username");
     if (savedId && savedName) {
       setUserId(savedId);
       setUsername(savedName);
+      setNameInput(savedName);
     }
     loadAssets().then(setAssets).catch(console.error);
   }, []);
@@ -37,8 +38,8 @@ export default function App() {
   const handleAuth = useCallback(() => {
     const name = nameInput.trim();
     if (!name) return;
-    const id = localStorage.getItem("hs_userId") || crypto.randomUUID();
-    localStorage.setItem("hs_userId", id);
+    const id = sessionStorage.getItem("hs_sessionId") || crypto.randomUUID();
+    sessionStorage.setItem("hs_sessionId", id);
     localStorage.setItem("hs_username", name);
     setUserId(id);
     setUsername(name);
@@ -82,7 +83,7 @@ export default function App() {
 
   if (!assets) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white text-xl">
+      <div className="flex items-center justify-center h-screen bg-gray-900 text-white text-xl sm:text-2xl">
         Loading assets...
       </div>
     );
@@ -90,24 +91,27 @@ export default function App() {
 
   if (screen === "AUTH") {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-6">
-        <h1 className="text-5xl font-bold tracking-tight">🦁 Herd &amp; Seek</h1>
-        <p className="text-lg text-green-200 max-w-md text-center">
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-6 sm:gap-8 px-4">
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-center">
+          🦁 Herd &amp; Seek
+        </h1>
+        <p className="text-base sm:text-lg md:text-xl text-green-200 max-w-md text-center">
           An asymmetric stealth game. Blend in with the herd, or hunt them down.
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs sm:max-w-md">
           <input
             type="text"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleAuth()}
             placeholder="Enter your username"
-            className="px-4 py-3 rounded-lg bg-white/10 border border-white/30 text-white placeholder-white/50 focus:outline-none focus:border-white"
+            className="flex-1 px-4 py-4 sm:py-3 rounded-lg bg-white/10 border border-white/30 text-white text-lg sm:text-base placeholder-white/50 focus:outline-none focus:border-white min-h-[56px]"
             maxLength={20}
+            autoComplete="off"
           />
           <button
             onClick={handleAuth}
-            className="px-6 py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition"
+            className="px-8 py-4 sm:py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-lg sm:text-base transition min-h-[56px] touch-manipulation"
           >
             Play
           </button>
@@ -124,30 +128,30 @@ export default function App() {
     const canStart = playerCount >= 2 && allReady;
 
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-6 overflow-auto py-8">
-        <h1 className="text-4xl font-bold">🦁 Herd &amp; Seek — Lobby</h1>
-        <p className={`text-sm ${connected ? "text-green-400" : "text-red-400"}`}>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-4 sm:gap-6 overflow-auto py-6 px-4">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center">
+          🦁 Herd &amp; Seek
+        </h1>
+        <p className={`text-sm sm:text-base ${connected ? "text-green-400" : "text-red-400"}`}>
           {connected ? "● Connected" : "○ Connecting..."}
         </p>
 
-        <div className="bg-black/30 rounded-xl p-6 w-full max-w-md">
-          <h2 className="text-xl font-semibold mb-3">
+        <div className="bg-black/30 rounded-xl p-4 sm:p-6 w-full max-w-md">
+          <h2 className="text-lg sm:text-xl font-semibold mb-3">
             Players ({playerCount})
           </h2>
           <div className="space-y-2">
             {gameState?.players.map((p) => (
               <div
                 key={p.id}
-                className="flex items-center justify-between bg-white/10 rounded-lg px-3 py-2"
+                className="flex items-center justify-between bg-white/10 rounded-lg px-3 py-3 sm:py-2"
               >
-                <span className="font-medium">
+                <span className="font-medium text-sm sm:text-base">
                   {ANIMAL_OPTIONS.find((a) => a.value === p.animalType)?.emoji}{" "}
                   {p.username}
                 </span>
                 <span
-                  className={`text-sm ${
-                    p.isReady ? "text-green-400" : "text-gray-400"
-                  }`}
+                  className={`text-sm ${p.isReady ? "text-green-400" : "text-gray-400"}`}
                 >
                   {p.isReady ? "✓ Ready" : "..."}
                 </span>
@@ -164,11 +168,9 @@ export default function App() {
           )}
         </div>
 
-        <div className="bg-black/30 rounded-xl p-6 w-full max-w-md space-y-4">
+        <div className="bg-black/30 rounded-xl p-4 sm:p-6 w-full max-w-md space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">
-              Select Animal
-            </label>
+            <label className="block text-sm font-medium mb-1">Select Animal</label>
             <select
               value={selectedAnimal}
               onChange={(e) => {
@@ -176,7 +178,7 @@ export default function App() {
                 setSelectedAnimal(val);
                 send({ type: "SELECT_ANIMAL", payload: { animalType: val } });
               }}
-              className="w-full px-3 py-2 rounded-lg bg-white/10 border border-white/30 text-white"
+              className="w-full px-3 py-3 sm:py-2 rounded-lg bg-white/10 border border-white/30 text-white text-base min-h-[48px]"
             >
               {ANIMAL_OPTIONS.map((a) => (
                 <option key={a.value} value={a.value} className="bg-gray-800">
@@ -195,7 +197,7 @@ export default function App() {
                 setSelectedPerk(val);
                 send({ type: "SELECT_PERK", payload: { perk: val } });
               }}
-              className="w-full px-3 py-2 rounded-lg bg-white/10 border border-white/30 text-white"
+              className="w-full px-3 py-3 sm:py-2 rounded-lg bg-white/10 border border-white/30 text-white text-base min-h-[48px]"
             >
               {PERK_OPTIONS.map((p) => (
                 <option key={p.value} value={p.value} className="bg-gray-800">
@@ -209,20 +211,18 @@ export default function App() {
           </div>
 
           <button
-            onClick={() =>
-              send({ type: "READY", payload: { isReady: !isReady } })
-            }
-            className={`w-full py-3 rounded-lg font-bold transition ${
+            onClick={() => send({ type: "READY", payload: { isReady: !isReady } })}
+            className={`w-full py-4 sm:py-3 rounded-lg font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation ${
               isReady
-                ? "bg-green-500 hover:bg-green-400 text-black"
-                : "bg-yellow-500 hover:bg-yellow-400 text-black"
+                ? "bg-green-500 hover:bg-green-400 active:bg-green-600 text-black"
+                : "bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black"
             }`}
           >
-            {isReady ? "✓ Ready — Click to Unready" : "Ready Up"}
+            {isReady ? "✓ Ready — Tap to Unready" : "Ready Up"}
           </button>
 
           {canStart && (
-            <p className="text-center text-green-300 animate-pulse">
+            <p className="text-center text-green-300 animate-pulse text-sm sm:text-base">
               Match starting...
             </p>
           )}
@@ -235,7 +235,10 @@ export default function App() {
   const isHunter = me?.isHunter ?? false;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-green-900">
+    <div
+      className="relative w-screen h-screen overflow-hidden bg-green-900"
+      style={{ touchAction: "none" }}
+    >
       <GameCanvas
         assets={assets}
         userId={userId}
@@ -246,75 +249,73 @@ export default function App() {
 
       {gameState?.phase === "PLAYING" && (
         <>
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-6 py-2 rounded-full text-2xl font-bold tabular-nums">
+          {/* Top Timer - responsive, scales down on mobile */}
+          <div className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xl sm:text-2xl font-bold tabular-nums">
             ⏱ {formatTime(gameState.timeRemaining)}
           </div>
 
-          <div className="absolute bottom-4 left-4 z-10 bg-black/70 text-white px-4 py-3 rounded-lg max-w-xs space-y-1">
-            <h3 className="text-sm font-bold text-green-300">Event Log</h3>
+          {/* Event Log - bottom left, smaller on mobile, collapsible */}
+          <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[160px] sm:max-w-xs space-y-1">
+            <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
             {eventLog.length === 0 && (
-              <p className="text-xs text-gray-400">No events yet...</p>
+              <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
             )}
-            {eventLog.map((e, i) => (
-              <p key={i} className="text-xs">
-                {e}
-              </p>
+            {eventLog.slice(0, 4).map((e, i) => (
+              <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
             ))}
           </div>
 
+          {/* Hunter Ammo - bottom right, responsive */}
           {isHunter && (
-            <div className="absolute bottom-4 right-4 z-10 bg-black/70 text-white px-4 py-3 rounded-lg">
-              <h3 className="text-sm font-bold text-red-400 mb-1">Ammo</h3>
-              <div className="flex gap-1 flex-wrap max-w-[120px]">
+            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
+              <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
+              <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
                 {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
                   <span
                     key={i}
-                    className={`text-lg ${
-                      i < gameState.ammo ? "opacity-100" : "opacity-20"
-                    }`}
+                    className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
                   >
                     🔫
                   </span>
                 ))}
               </div>
-              <p className="text-xs text-gray-300 mt-1">
+              <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
                 {gameState.ammo}/{gameState.maxAmmo}
               </p>
             </div>
           )}
 
+          {/* Animal role indicator - bottom right, responsive */}
           {!isHunter && me?.isAlive && (
-            <div className="absolute bottom-4 right-4 z-10 bg-black/70 text-white px-4 py-2 rounded-lg text-sm">
+            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm">
               <p>
                 Role: <span className="text-green-400">Animal</span>
               </p>
-              <p className="text-xs text-gray-300">
-                Survive! Shift/F for perks.
+              <p className="text-[10px] sm:text-xs text-gray-300">
+                Survive! Move to blend in.
               </p>
             </div>
           )}
 
+          {/* Neutralized overlay */}
           {!me?.isAlive && !isHunter && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-black/80 text-white px-8 py-4 rounded-xl text-2xl font-bold">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-black/80 text-white px-6 sm:px-8 py-4 rounded-xl text-xl sm:text-2xl font-bold text-center">
               💀 You were neutralized!
             </div>
           )}
         </>
       )}
 
+      {/* End Game Screen - responsive */}
       {gameState?.phase === "ENDED" && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80">
-          <div className="bg-gray-900 text-white rounded-2xl p-8 max-w-md text-center space-y-4">
-            <h2 className="text-4xl font-bold">
-              {gameState.winner === "hunter"
-                ? "🎯 Hunter Wins!"
-                : "🐾 Animals Win!"}
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 px-4">
+          <div className="bg-gray-900 text-white rounded-2xl p-6 sm:p-8 max-w-md w-full text-center space-y-4">
+            <h2 className="text-3xl sm:text-4xl font-bold">
+              {gameState.winner === "hunter" ? "🎯 Hunter Wins!" : "🐾 Animals Win!"}
             </h2>
-            <div className="space-y-1">
+            <div className="space-y-1 max-h-40 overflow-y-auto">
               {gameState.eventLog.map((e, i) => (
-                <p key={i} className="text-sm text-gray-300">
-                  {e}
-                </p>
+                <p key={i} className="text-sm text-gray-300">{e}</p>
               ))}
             </div>
             <button
@@ -322,7 +323,7 @@ export default function App() {
                 send({ type: "RESTART" });
                 setScreen("LOBBY");
               }}
-              className="px-6 py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition"
+              className="w-full px-6 py-4 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation"
             >
               Return to Lobby
             </button>

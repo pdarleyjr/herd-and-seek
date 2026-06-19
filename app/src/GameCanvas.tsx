@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { type AssetMap } from "./AssetLoader";
 import {
   type SerializedState,
@@ -59,6 +59,14 @@ function generateTrees(): TreeEntity[] {
   return trees;
 }
 
+function isTouchDevice(): boolean {
+  return (
+    "ontouchstart" in window ||
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+
 export default function GameCanvas({
   assets,
   userId,
@@ -84,6 +92,25 @@ export default function GameCanvas({
   const dustParticlesRef = useRef<
     { x: number; y: number; life: number; maxLife: number }[]
   >([]);
+
+  const [isMobile] = useState(() => isTouchDevice());
+
+  const joystickRef = useRef<{
+    active: boolean;
+    touchId: number | null;
+    originX: number;
+    originY: number;
+    dx: number;
+    dy: number;
+  }>({ active: false, touchId: null, originX: 0, originY: 0, dx: 0, dy: 0 });
+
+  const [joystickVisual, setJoystickVisual] = useState<{
+    visible: boolean;
+    originX: number;
+    originY: number;
+    knobX: number;
+    knobY: number;
+  }>({ visible: false, originX: 0, originY: 0, knobX: 0, knobY: 0 });
 
   useEffect(() => {
     if (!gameState) return;
@@ -162,6 +189,11 @@ export default function GameCanvas({
     if (keys["a"] || keys["arrowleft"]) dx -= 1;
     if (keys["d"] || keys["arrowright"]) dx += 1;
 
+    if (isMobile && joystickRef.current.active) {
+      dx = joystickRef.current.dx;
+      dy = joystickRef.current.dy;
+    }
+
     const isCamouflage =
       perkStateRef.current.type === "camouflage" &&
       Date.now() < perkStateRef.current.activeUntil;
@@ -176,8 +208,10 @@ export default function GameCanvas({
 
     if (dx !== 0 || dy !== 0) {
       const len = Math.sqrt(dx * dx + dy * dy);
-      dx /= len;
-      dy /= len;
+      if (len > 0) {
+        dx /= len;
+        dy /= len;
+      }
     }
 
     let speed = me.isHunter ? HUNTER_SPEED : ANIMAL_SPEED;
@@ -214,7 +248,7 @@ export default function GameCanvas({
         payload: { x: localPosRef.current.x, y: localPosRef.current.y },
       });
     }
-  }, [userId, send, localPosRef]);
+  }, [userId, send, localPosRef, isMobile]);
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -432,10 +466,122 @@ export default function GameCanvas({
       });
     };
 
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      const state = serverStateRef.current;
+      if (!state || state.phase !== "PLAYING") return;
+      const me = state.players.find((p) => p.id === userId);
+      if (!me || !me.isAlive) return;
+
+      const touch = e.changedTouches[0];
+      const touchX = touch.clientX;
+      const touchY = touch.clientY;
+
+      const isHunter = me.isHunter;
+      const w = window.innerWidth;
+      const rightHalf = touchX > w / 2;
+
+      if (isHunter && rightHalf) {
+        mouseRef.current.x = touchX;
+        mouseRef.current.y = touchY;
+        mouseRef.current.worldX = touchX + cameraRef.current.x;
+        mouseRef.current.worldY = touchY + cameraRef.current.y;
+        send({
+          type: "SHOOT",
+          payload: {
+            targetX: mouseRef.current.worldX,
+            targetY: mouseRef.current.worldY,
+          },
+        });
+      } else if (!joystickRef.current.active) {
+        joystickRef.current.active = true;
+        joystickRef.current.touchId = touch.identifier;
+        joystickRef.current.originX = touchX;
+        joystickRef.current.originY = touchY;
+        joystickRef.current.dx = 0;
+        joystickRef.current.dy = 0;
+        setJoystickVisual({
+          visible: true,
+          originX: touchX,
+          originY: touchY,
+          knobX: touchX,
+          knobY: touchY,
+        });
+      } else if (isHunter) {
+        mouseRef.current.x = touchX;
+        mouseRef.current.y = touchY;
+        mouseRef.current.worldX = touchX + cameraRef.current.x;
+        mouseRef.current.worldY = touchY + cameraRef.current.y;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const state = serverStateRef.current;
+      if (!state || state.phase !== "PLAYING") return;
+      const me = state.players.find((p) => p.id === userId);
+      if (!me || !me.isAlive) return;
+
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (
+          joystickRef.current.active &&
+          touch.identifier === joystickRef.current.touchId
+        ) {
+          const dx = touch.clientX - joystickRef.current.originX;
+          const dy = touch.clientY - joystickRef.current.originY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const maxDist = 60;
+
+          if (dist > maxDist) {
+            const angle = Math.atan2(dy, dx);
+            joystickRef.current.dx = Math.cos(angle);
+            joystickRef.current.dy = Math.sin(angle);
+            setJoystickVisual((prev) => ({
+              ...prev,
+              knobX: prev.originX + Math.cos(angle) * maxDist,
+              knobY: prev.originY + Math.sin(angle) * maxDist,
+            }));
+          } else {
+            joystickRef.current.dx = dx / maxDist;
+            joystickRef.current.dy = dy / maxDist;
+            setJoystickVisual((prev) => ({
+              ...prev,
+              knobX: touch.clientX,
+              knobY: touch.clientY,
+            }));
+          }
+        } else if (me.isHunter) {
+          mouseRef.current.x = touch.clientX;
+          mouseRef.current.y = touch.clientY;
+          mouseRef.current.worldX = touch.clientX + cameraRef.current.x;
+          mouseRef.current.worldY = touch.clientY + cameraRef.current.y;
+        }
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === joystickRef.current.touchId) {
+          joystickRef.current.active = false;
+          joystickRef.current.touchId = null;
+          joystickRef.current.dx = 0;
+          joystickRef.current.dy = 0;
+          setJoystickVisual({ visible: false, originX: 0, originY: 0, knobX: 0, knobY: 0 });
+        }
+      }
+    };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("click", onClick);
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+    canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
     rafRef.current = requestAnimationFrame(gameLoop);
 
@@ -445,14 +591,85 @@ export default function GameCanvas({
       window.removeEventListener("keyup", onKeyUp);
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
       cancelAnimationFrame(rafRef.current);
     };
   }, [gameLoop, userId, send]);
 
+  const currentMe = gameState?.players.find((p) => p.id === userId);
+  const canUsePerk =
+    currentMe && !currentMe.isHunter && currentMe.isAlive && currentMe.perk !== "none";
+
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 z-0 cursor-crosshair"
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 z-0 touch-none"
+        style={{ touchAction: "none" }}
+      />
+
+      {isMobile && joystickVisual.visible && (
+        <div className="absolute z-5 pointer-events-none">
+          <div
+            className="absolute rounded-full border-4 border-white/30 bg-white/10"
+            style={{
+              width: 120,
+              height: 120,
+              left: joystickVisual.originX - 60,
+              top: joystickVisual.originY - 60,
+            }}
+          />
+          <div
+            className="absolute rounded-full bg-white/60 border-2 border-white/80"
+            style={{
+              width: 50,
+              height: 50,
+              left: joystickVisual.knobX - 25,
+              top: joystickVisual.knobY - 25,
+            }}
+          />
+        </div>
+      )}
+
+      {isMobile && canUsePerk && gameState?.phase === "PLAYING" && (
+        <div className="absolute bottom-24 right-4 z-10 flex flex-col gap-3">
+          {currentMe?.perk === "sprint" && (
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                if (currentMe.perk === "sprint") {
+                  perkStateRef.current = {
+                    type: "sprint",
+                    activeUntil: Date.now() + 1500,
+                  };
+                }
+              }}
+              className="w-16 h-16 rounded-full bg-blue-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform"
+            >
+              💨
+            </button>
+          )}
+          {currentMe?.perk === "camouflage" && (
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                if (currentMe.perk === "camouflage") {
+                  perkStateRef.current = {
+                    type: "camouflage",
+                    activeUntil: Date.now() + 3000,
+                  };
+                }
+              }}
+              className="w-16 h-16 rounded-full bg-purple-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform"
+            >
+              🫥
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 }

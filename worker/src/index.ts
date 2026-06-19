@@ -260,6 +260,7 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   handleShoot(payload: any) {
+    if (this.state.phase !== "PLAYING") return;
     const { targetX, targetY } = payload || {};
     if (typeof targetX !== "number" || typeof targetY !== "number") return;
     if (this.state.ammo <= 0) return;
@@ -309,8 +310,10 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   endGame(winner: "hunter" | "animals", reason: string) {
+    if (this.state.phase === "ENDED") return;
     this.state.phase = "ENDED";
     this.state.winner = winner;
+    this.state.timeRemaining = 0;
     this.state.eventLog.unshift(`Game Over: ${reason}`);
     this.state.eventLog = this.state.eventLog.slice(0, 10);
     this.stopLoops();
@@ -334,14 +337,13 @@ export class GameRoomDurableObject implements DurableObject {
     this.countdownInterval = setInterval(() => {
       if (this.state.phase !== "PLAYING") return;
       const elapsed = (Date.now() - this.state.matchStartTime) / 1000;
-      this.state.timeRemaining = Math.max(
-        0,
-        MATCH_DURATION - Math.floor(elapsed)
-      );
-      if (this.state.timeRemaining <= 0) {
+      if (elapsed >= MATCH_DURATION) {
+        this.state.timeRemaining = 0;
         this.endGame("animals", "Time expired! Animals survived!");
+        return;
       }
-    }, 1000);
+      this.state.timeRemaining = MATCH_DURATION - Math.floor(elapsed);
+    }, 250);
   }
 
   stopLoops() {

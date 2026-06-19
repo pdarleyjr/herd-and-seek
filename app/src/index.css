@@ -9,9 +9,20 @@ body,
   height: 100%;
   overflow: hidden;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
 }
 
 canvas {
   display: block;
   image-rendering: pixelated;
+}
+
+select,
+input,
+button {
+  -webkit-tap-highlight-color: transparent;
 }
