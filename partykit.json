@@ -1,0 +1,7 @@
+{
+  "$schema": "https://partykit.io/schema.json",
+  "name": "herd-and-seek-backend",
+  "main": "party/main.ts",
+  "compatibilityDate": "2023-05-26",
+  "port": 1999
+}
