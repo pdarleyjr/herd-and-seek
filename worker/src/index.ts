@@ -5,7 +5,6 @@ export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 export interface PlayerState {
   id: string;
   username: string;
-  ws: WebSocket;
   x: number;
   y: number;
   animalType: AnimalType;
@@ -49,8 +48,6 @@ const WORLD_SIZE = 2000;
 const PLAYER_RADIUS = 32;
 const MATCH_DURATION = 120;
 
-const rooms = new Map<string, GameRoom>();
-
 function randomAnimal(): AnimalType {
   const animals: AnimalType[] = ["elephant", "penguin", "monkey", "giraffe"];
   return animals[Math.floor(Math.random() * animals.length)];
@@ -74,12 +71,12 @@ function npcCountForPlayers(playerCount: number): number {
   return Math.min(80, 50 + playerCount * 8);
 }
 
-class GameRoom {
+export class GameRoomDurableObject implements DurableObject {
   state: RoomState;
   syncInterval: ReturnType<typeof setInterval> | null = null;
   countdownInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor() {
+  constructor(public ctx: DurableObjectState) {
     this.state = {
       phase: "LOBBY",
       players: [],
@@ -94,48 +91,43 @@ class GameRoom {
     };
   }
 
-  addPlayer(id: string, username: string, ws: WebSocket) {
-    const existing = this.state.players.find((p) => p.id === id);
-    if (!existing) {
-      this.state.players.push({
-        id,
-        username,
-        ws,
-        x: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
-        y: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
-        animalType: randomAnimal(),
-        isHunter: false,
-        isReady: false,
-        isAlive: true,
-        perk: "none",
-      });
-    } else {
-      existing.ws = ws;
-      existing.isAlive = true;
+  async fetch(request: Request): Promise<Response> {
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
     }
-    this.broadcastState();
+
+    const url = new URL(request.url);
+    const userId = url.searchParams.get("userId") || crypto.randomUUID();
+    const username = url.searchParams.get("username") || "Anonymous";
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+
+    this.ctx.acceptWebSocket(server);
+
+    server.serializeAttachment({ userId, username });
+
+    this.addPlayer(userId, username);
+
+    return new Response(null, { status: 101, webSocket: client });
   }
 
-  removePlayer(id: string) {
-    this.state.players = this.state.players.filter((p) => p.id !== id);
-    if (this.state.phase === "PLAYING" && this.state.hunterId === id) {
-      this.endGame("animals", "Hunter disconnected!");
-    } else if (this.state.phase === "PLAYING") {
-      this.checkWinCondition();
-    }
-    this.broadcastState();
-  }
-
-  handleMessage(msg: string, ws: WebSocket) {
-    const player = this.state.players.find((p) => p.ws === ws);
-    if (!player) return;
+  webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    if (!attachment) return;
+    const userId = attachment.userId;
 
     let parsed: ClientMessage;
     try {
-      parsed = JSON.parse(msg);
+      parsed = JSON.parse(message as string);
     } catch {
       return;
     }
+
+    const player = this.state.players.find((p) => p.id === userId);
+    if (!player) return;
 
     switch (parsed.type) {
       case "READY":
@@ -181,6 +173,56 @@ class GameRoom {
         }
         break;
     }
+  }
+
+  webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): void {
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    if (!attachment) return;
+    const userId = attachment.userId;
+
+    this.removePlayer(userId);
+
+    if (this.state.players.length === 0) {
+      this.stopLoops();
+    }
+  }
+
+  webSocketError(ws: WebSocket, error: unknown): void {
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    if (!attachment) return;
+    const userId = attachment.userId;
+    this.removePlayer(userId);
+  }
+
+  addPlayer(id: string, username: string) {
+    const existing = this.state.players.find((p) => p.id === id);
+    if (!existing) {
+      this.state.players.push({
+        id,
+        username,
+        x: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
+        y: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
+        animalType: randomAnimal(),
+        isHunter: false,
+        isReady: false,
+        isAlive: true,
+        perk: "none",
+      });
+    } else {
+      existing.isAlive = true;
+      existing.isReady = false;
+    }
+    this.broadcastState();
+  }
+
+  removePlayer(id: string) {
+    this.state.players = this.state.players.filter((p) => p.id !== id);
+    if (this.state.phase === "PLAYING" && this.state.hunterId === id) {
+      this.endGame("animals", "Hunter disconnected!");
+    } else if (this.state.phase === "PLAYING") {
+      this.checkWinCondition();
+    }
+    this.broadcastState();
   }
 
   tryStartMatch() {
@@ -357,9 +399,10 @@ class GameRoom {
 
   broadcast(msg: ServerMessage) {
     const data = JSON.stringify(msg);
-    for (const p of this.state.players) {
+    const wsList = this.ctx.getWebSockets();
+    for (const ws of wsList) {
       try {
-        p.ws.send(data);
+        ws.send(data);
       } catch {
         // connection may be closed
       }
@@ -373,48 +416,12 @@ class GameRoom {
 
 export default {
   async fetch(request: Request, env: any, ctx: any): Promise<Response> {
-    const upgradeHeader = request.headers.get("Upgrade");
-    if (upgradeHeader !== "websocket") {
-      return new Response("Herd & Seek WebSocket Server", {
-        status: 200,
-        headers: { "Content-Type": "text/plain" },
-      });
-    }
-
     const url = new URL(request.url);
-    const userId = url.searchParams.get("userId") || crypto.randomUUID();
-    const username = url.searchParams.get("username") || "Anonymous";
     const roomId = url.searchParams.get("room") || "lobby";
 
-    const pair = new WebSocketPair();
-    const client = pair[0];
-    const server = pair[1];
+    const id = env.GAME_ROOM.idFromName(roomId);
+    const stub = env.GAME_ROOM.get(id);
 
-    let room = rooms.get(roomId);
-    if (!room) {
-      room = new GameRoom();
-      rooms.set(roomId, room);
-    }
-
-    server.accept();
-    room.addPlayer(userId, username, server);
-
-    server.addEventListener("message", (event: MessageEvent) => {
-      room!.handleMessage(event.data as string, server);
-    });
-
-    server.addEventListener("close", () => {
-      room!.removePlayer(userId);
-      if (room!.state.players.length === 0) {
-        room!.stopLoops();
-        rooms.delete(roomId);
-      }
-    });
-
-    server.addEventListener("error", () => {
-      room!.removePlayer(userId);
-    });
-
-    return new Response(null, { status: 101, webSocket: client });
+    return stub.fetch(request);
   },
 };

@@ -2,4 +2,10 @@ name = "herd-and-seek-backend"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
-[vars]
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoomDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GameRoomDurableObject"]
