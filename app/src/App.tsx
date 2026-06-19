@@ -110,8 +110,11 @@ export default function App() {
             autoComplete="off"
           />
           <button
-            onClick={handleAuth}
-            className="px-8 py-4 sm:py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-lg sm:text-base transition min-h-[56px] touch-manipulation"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              handleAuth();
+            }}
+            className="px-8 py-4 sm:py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-lg sm:text-base transition min-h-[56px] touch-manipulation select-none"
           >
             Play
           </button>
@@ -211,8 +214,11 @@ export default function App() {
           </div>
 
           <button
-            onClick={() => send({ type: "READY", payload: { isReady: !isReady } })}
-            className={`w-full py-4 sm:py-3 rounded-lg font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation ${
+            onPointerDown={(e) => {
+              e.preventDefault();
+              send({ type: "READY", payload: { isReady: !isReady } });
+            }}
+            className={`w-full py-4 sm:py-3 rounded-lg font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation select-none ${
               isReady
                 ? "bg-green-500 hover:bg-green-400 active:bg-green-600 text-black"
                 : "bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black"
@@ -319,11 +325,12 @@ export default function App() {
               ))}
             </div>
             <button
-              onClick={() => {
+              onPointerDown={(e) => {
+                e.preventDefault();
                 send({ type: "RESTART" });
                 setScreen("LOBBY");
               }}
-              className="w-full px-6 py-4 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation"
+              className="w-full px-6 py-4 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation select-none"
             >
               Return to Lobby
             </button>

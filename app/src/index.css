@@ -13,16 +13,19 @@ body,
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
 }
 
 canvas {
   display: block;
   image-rendering: pixelated;
+  touch-action: none;
 }
 
+button,
 select,
 input,
-button {
+a,
+[role="button"] {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
