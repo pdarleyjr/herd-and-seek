@@ -1,4 +1,8 @@
-export type AnimalType = "elephant" | "penguin" | "monkey" | "giraffe";
+export type AnimalType =
+  | "elephant" | "penguin" | "monkey" | "giraffe"
+  | "bear" | "dog" | "frog" | "horse"
+  | "pig" | "rabbit" | "cow" | "duck"
+  | "panda" | "parrot" | "owl" | "snake";
 export type PerkType = "sprint" | "camouflage" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
@@ -48,9 +52,15 @@ const WORLD_SIZE = 2000;
 const PLAYER_RADIUS = 32;
 const MATCH_DURATION = 120;
 
+const ALL_ANIMALS: AnimalType[] = [
+  "elephant", "penguin", "monkey", "giraffe",
+  "bear", "dog", "frog", "horse",
+  "pig", "rabbit", "cow", "duck",
+  "panda", "parrot", "owl", "snake",
+];
+
 function randomAnimal(): AnimalType {
-  const animals: AnimalType[] = ["elephant", "penguin", "monkey", "giraffe"];
-  return animals[Math.floor(Math.random() * animals.length)];
+  return ALL_ANIMALS[Math.floor(Math.random() * ALL_ANIMALS.length)];
 }
 
 function generateNpcSeeds(count: number): NpcSeed[] {
@@ -217,10 +227,14 @@ export class GameRoomDurableObject implements DurableObject {
 
   removePlayer(id: string) {
     this.state.players = this.state.players.filter((p) => p.id !== id);
-    if (this.state.phase === "PLAYING" && this.state.hunterId === id) {
-      this.endGame("animals", "Hunter disconnected!");
-    } else if (this.state.phase === "PLAYING") {
-      this.checkWinCondition();
+    if (this.state.phase === "PLAYING") {
+      if (this.state.hunterId === id) {
+        this.endGame("animals", "Hunter disconnected!");
+      } else if (this.state.players.length < 2) {
+        this.endGame("animals", "Not enough players to continue!");
+      } else {
+        this.checkWinCondition();
+      }
     }
     this.broadcastState();
   }
@@ -244,8 +258,8 @@ export class GameRoomDurableObject implements DurableObject {
 
     this.state.hunterId = hunterId;
     const animalCount = players.length - 1;
-    this.state.ammo = animalCount * 2;
-    this.state.maxAmmo = animalCount * 2;
+    this.state.ammo = animalCount * 10;
+    this.state.maxAmmo = animalCount * 10;
     this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(players.length));
     this.state.phase = "PLAYING";
     this.state.timeRemaining = MATCH_DURATION;

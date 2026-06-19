@@ -9,6 +9,7 @@ import {
   ANIMAL_OPTIONS,
   PERK_OPTIONS,
 } from "./types";
+import { soundManager } from "./SoundManager";
 
 type Screen = "AUTH" | "LOBBY" | "GAME";
 
@@ -62,9 +63,16 @@ export default function App() {
         }
       } else if (data.type === "HIT") {
         const { hit } = data.payload;
-        onEvent(hit ? "Player neutralized!" : "Hunter missed!");
+        if (hit) {
+          soundManager.hit();
+          onEvent("Player neutralized!");
+        } else {
+          soundManager.miss();
+          onEvent("Hunter missed!");
+        }
       } else if (data.type === "GAME_OVER") {
         const { winner, reason } = data.payload;
+        soundManager.gameEnd();
         onEvent(
           `Game Over: ${reason} — ${winner === "hunter" ? "Hunter" : "Animals"} win!`
         );
@@ -150,8 +158,7 @@ export default function App() {
                 className="flex items-center justify-between bg-white/10 rounded-lg px-3 py-3 sm:py-2"
               >
                 <span className="font-medium text-sm sm:text-base">
-                  {ANIMAL_OPTIONS.find((a) => a.value === p.animalType)?.emoji}{" "}
-                  {p.username}
+                  🐾 {p.username}
                 </span>
                 <span
                   className={`text-sm ${p.isReady ? "text-green-400" : "text-gray-400"}`}

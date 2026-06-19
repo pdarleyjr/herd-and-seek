@@ -1,4 +1,9 @@
-export type AnimalType = "elephant" | "penguin" | "monkey" | "giraffe";
+export type AnimalType =
+  | "elephant" | "penguin" | "monkey" | "giraffe"
+  | "bear" | "dog" | "frog" | "horse"
+  | "pig" | "rabbit" | "cow" | "duck"
+  | "panda" | "parrot" | "owl" | "snake";
+
 export type PerkType = "sprint" | "camouflage" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
@@ -48,6 +53,18 @@ export const ANIMAL_OPTIONS: { value: AnimalType; label: string; emoji: string }
   { value: "penguin", label: "Penguin", emoji: "🐧" },
   { value: "monkey", label: "Monkey", emoji: "🐵" },
   { value: "giraffe", label: "Giraffe", emoji: "🦒" },
+  { value: "bear", label: "Bear", emoji: "🐻" },
+  { value: "dog", label: "Dog", emoji: "🐶" },
+  { value: "frog", label: "Frog", emoji: "🐸" },
+  { value: "horse", label: "Horse", emoji: "🐴" },
+  { value: "pig", label: "Pig", emoji: "🐷" },
+  { value: "rabbit", label: "Rabbit", emoji: "🐰" },
+  { value: "cow", label: "Cow", emoji: "🐮" },
+  { value: "duck", label: "Duck", emoji: "🦆" },
+  { value: "panda", label: "Panda", emoji: "🐼" },
+  { value: "parrot", label: "Parrot", emoji: "🦜" },
+  { value: "owl", label: "Owl", emoji: "🦉" },
+  { value: "snake", label: "Snake", emoji: "🐍" },
 ];
 
 export const PERK_OPTIONS: { value: PerkType; label: string; description: string }[] = [
@@ -69,3 +86,10 @@ export const PLAYER_RADIUS = 32;
 export const NPC_RADIUS = 32;
 export const ANIMAL_SPEED = 3;
 export const HUNTER_SPEED = 3.5;
+
+export const ALL_ANIMAL_TYPES: AnimalType[] = [
+  "elephant", "penguin", "monkey", "giraffe",
+  "bear", "dog", "frog", "horse",
+  "pig", "rabbit", "cow", "duck",
+  "panda", "parrot", "owl", "snake",
+];

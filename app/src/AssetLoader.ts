@@ -1,13 +1,10 @@
 export type AssetKey =
-  | "hunter"
-  | "survivor"
-  | "elephant"
-  | "penguin"
-  | "monkey"
-  | "giraffe"
-  | "tree"
-  | "treeBrown"
-  | "bush";
+  | "hunter" | "survivor"
+  | "elephant" | "penguin" | "monkey" | "giraffe"
+  | "bear" | "dog" | "frog" | "horse"
+  | "pig" | "rabbit" | "cow" | "duck"
+  | "panda" | "parrot" | "owl" | "snake"
+  | "tree" | "treeBrown" | "bush";
 
 export type AssetMap = Record<AssetKey, HTMLImageElement>;
 
@@ -18,6 +15,18 @@ const ASSET_PATHS: Record<AssetKey, string> = {
   penguin: "/assets/penguin.png",
   monkey: "/assets/monkey.png",
   giraffe: "/assets/giraffe.png",
+  bear: "/assets/bear.png",
+  dog: "/assets/dog.png",
+  frog: "/assets/frog.png",
+  horse: "/assets/horse.png",
+  pig: "/assets/pig.png",
+  rabbit: "/assets/rabbit.png",
+  cow: "/assets/cow.png",
+  duck: "/assets/duck.png",
+  panda: "/assets/panda.png",
+  parrot: "/assets/parrot.png",
+  owl: "/assets/owl.png",
+  snake: "/assets/snake.png",
   tree: "/assets/tree.png",
   treeBrown: "/assets/treeBrown.png",
   bush: "/assets/bush.png",
@@ -33,8 +42,7 @@ export function loadAssets(): Promise<AssetMap> {
     return new Promise<[AssetKey, HTMLImageElement]>((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve([key, img]);
-      img.onerror = () =>
-        reject(new Error(`Failed to load asset: ${src}`));
+      img.onerror = () => reject(new Error(`Failed to load asset: ${src}`));
       img.src = src;
     });
   });
@@ -55,11 +63,11 @@ export function getAssets(): AssetMap {
   return cachedAssets;
 }
 
-export const ANIMAL_ASSETS: AssetKey[] = [
-  "elephant",
-  "penguin",
-  "monkey",
-  "giraffe",
+export const ANIMAL_ASSET_KEYS: AssetKey[] = [
+  "elephant", "penguin", "monkey", "giraffe",
+  "bear", "dog", "frog", "horse",
+  "pig", "rabbit", "cow", "duck",
+  "panda", "parrot", "owl", "snake",
 ];
 
 export const ENVIRONMENT_ASSETS: AssetKey[] = ["tree", "treeBrown", "bush"];

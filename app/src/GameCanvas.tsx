@@ -8,6 +8,7 @@ import {
   ANIMAL_SPEED,
   HUNTER_SPEED,
 } from "./types";
+import { soundManager } from "./SoundManager";
 
 interface NpcEntity {
   id: number;
@@ -26,6 +27,19 @@ interface TreeEntity {
   x: number;
   y: number;
   type: "green" | "brown" | "bush";
+}
+
+interface MuzzleFlash {
+  x: number;
+  y: number;
+  life: number;
+}
+
+interface HitMarker {
+  x: number;
+  y: number;
+  life: number;
+  hit: boolean;
 }
 
 interface GameCanvasProps {
@@ -92,6 +106,9 @@ export default function GameCanvas({
   const dustParticlesRef = useRef<
     { x: number; y: number; life: number; maxLife: number }[]
   >([]);
+  const muzzleFlashesRef = useRef<MuzzleFlash[]>([]);
+  const hitMarkersRef = useRef<HitMarker[]>([]);
+  const hunterAngleRef = useRef(0);
 
   const [isMobile] = useState(() => isTouchDevice());
 
@@ -128,6 +145,7 @@ export default function GameCanvas({
       }));
       const me = gameState.players.find((p) => p.id === userId);
       if (me) localPosRef.current = { x: me.x, y: me.y };
+      soundManager.gameStart();
     }
 
     if (treesRef.current.length === 0) {
@@ -229,6 +247,14 @@ export default function GameCanvas({
       Math.min(WORLD_SIZE - 32, localPosRef.current.y)
     );
 
+    if (me.isHunter) {
+      const aimDx = mouseRef.current.worldX - localPosRef.current.x;
+      const aimDy = mouseRef.current.worldY - localPosRef.current.y;
+      hunterAngleRef.current = Math.atan2(aimDy, aimDx) + Math.PI / 2;
+    } else if (dx !== 0 || dy !== 0) {
+      hunterAngleRef.current = Math.atan2(dy, dx) + Math.PI / 2;
+    }
+
     if (isSprinting && (dx !== 0 || dy !== 0)) {
       if (Math.random() < 0.3) {
         dustParticlesRef.current.push({
@@ -259,7 +285,10 @@ export default function GameCanvas({
     const { w, h } = canvasSizeRef.current;
     ctx.clearRect(0, 0, w, h);
 
-    ctx.fillStyle = "#4a7c3a";
+    const grd = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) / 1.2);
+    grd.addColorStop(0, "#5a8c4a");
+    grd.addColorStop(1, "#3a6c2a");
+    ctx.fillStyle = grd;
     ctx.fillRect(0, 0, w, h);
 
     const state = serverStateRef.current;
@@ -281,16 +310,37 @@ export default function GameCanvas({
     const camX = cameraRef.current.x;
     const camY = cameraRef.current.y;
 
-    ctx.strokeStyle = "#3a5c2a";
-    ctx.lineWidth = 8;
+    ctx.strokeStyle = "#2a4c1a";
+    ctx.lineWidth = 12;
     ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+
+    const gridSize = 100;
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    ctx.lineWidth = 1;
+    const startX = Math.floor(camX / gridSize) * gridSize;
+    const startY = Math.floor(camY / gridSize) * gridSize;
+    for (let x = startX; x < camX + w + gridSize; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x - camX, 0);
+      ctx.lineTo(x - camX, h);
+      ctx.stroke();
+    }
+    for (let y = startY; y < camY + h + gridSize; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y - camY);
+      ctx.lineTo(w, y - camY);
+      ctx.stroke();
+    }
 
     interface RenderItem {
       x: number;
       y: number;
       img: HTMLImageElement;
       wobble: number;
+      rotation: number;
       size: number;
+      isEntity: boolean;
+      shadow: boolean;
     }
     const renderArray: RenderItem[] = [];
 
@@ -300,7 +350,10 @@ export default function GameCanvas({
         y: npc.y,
         img: getAnimalImage(assets, npc.animalType),
         wobble: npc.wobble,
+        rotation: 0,
         size: 64,
+        isEntity: true,
+        shadow: true,
       });
     }
 
@@ -314,7 +367,15 @@ export default function GameCanvas({
       const py = isLocal ? localPosRef.current.y : p.y;
 
       let wobble = 0;
-      if (!p.isHunter) {
+      let rotation = 0;
+
+      if (p.isHunter) {
+        if (isLocal) {
+          rotation = hunterAngleRef.current;
+        } else {
+          rotation = hunterAngleRef.current;
+        }
+      } else {
         wobble = Math.sin(gameTickRef.current * 0.2 + (isLocal ? 0 : p.x * 0.01)) * 0.1;
       }
 
@@ -323,7 +384,10 @@ export default function GameCanvas({
         y: py,
         img,
         wobble,
+        rotation,
         size: 64,
+        isEntity: true,
+        shadow: true,
       });
     }
 
@@ -335,7 +399,10 @@ export default function GameCanvas({
         y: t.y,
         img,
         wobble: 0,
+        rotation: 0,
         size: t.type === "bush" ? 48 : 80,
+        isEntity: false,
+        shadow: t.type !== "bush",
       });
     }
 
@@ -353,9 +420,18 @@ export default function GameCanvas({
       )
         continue;
 
+      if (item.shadow) {
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.beginPath();
+        ctx.ellipse(screenX, screenY + item.size * 0.35, item.size * 0.4, item.size * 0.15, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       ctx.save();
       ctx.translate(screenX, screenY);
-      if (item.wobble !== 0) {
+      if (item.rotation !== 0) {
+        ctx.rotate(item.rotation);
+      } else if (item.wobble !== 0) {
         ctx.rotate(item.wobble);
       }
       ctx.drawImage(item.img, -item.size / 2, -item.size / 2, item.size, item.size);
@@ -378,20 +454,81 @@ export default function GameCanvas({
       ctx.fill();
     }
 
+    for (let i = muzzleFlashesRef.current.length - 1; i >= 0; i--) {
+      const mf = muzzleFlashesRef.current[i];
+      mf.life--;
+      if (mf.life <= 0) {
+        muzzleFlashesRef.current.splice(i, 1);
+        continue;
+      }
+      const alpha = mf.life / 8;
+      const sx = mf.x - camX;
+      const sy = mf.y - camY;
+      ctx.fillStyle = `rgba(255, 220, 80, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, (1 - alpha) * 25 + 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 120, 40, ${alpha * 0.6})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, (1 - alpha) * 15 + 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (let i = hitMarkersRef.current.length - 1; i >= 0; i--) {
+      const hm = hitMarkersRef.current[i];
+      hm.life--;
+      if (hm.life <= 0) {
+        hitMarkersRef.current.splice(i, 1);
+        continue;
+      }
+      const alpha = hm.life / 30;
+      const sx = hm.x - camX;
+      const sy = hm.y - camY;
+      const color = hm.hit ? "rgba(255, 60, 60" : "rgba(200, 200, 200";
+      ctx.strokeStyle = `${color}, ${alpha})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 20 + (1 - alpha) * 15, 0, Math.PI * 2);
+      ctx.stroke();
+      if (hm.hit) {
+        ctx.beginPath();
+        ctx.moveTo(sx - 10, sy - 10);
+        ctx.lineTo(sx + 10, sy + 10);
+        ctx.moveTo(sx + 10, sy - 10);
+        ctx.lineTo(sx - 10, sy + 10);
+        ctx.stroke();
+      }
+    }
+
     if (me && me.isHunter && me.isAlive) {
       const mx = mouseRef.current.worldX - camX;
       const my = mouseRef.current.worldY - camY;
+      const pulse = Math.sin(gameTickRef.current * 0.15) * 3;
       ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(mx, my, 20, 0, Math.PI * 2);
+      ctx.arc(mx, my, 22 + pulse, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 0, 0, 0.4)";
       ctx.beginPath();
-      ctx.moveTo(mx - 12, my);
-      ctx.lineTo(mx + 12, my);
-      ctx.moveTo(mx, my - 12);
-      ctx.lineTo(mx, my + 12);
+      ctx.arc(mx, my, 30 + pulse, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 0, 0, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(mx - 14, my);
+      ctx.lineTo(mx + 14, my);
+      ctx.moveTo(mx, my - 14);
+      ctx.lineTo(mx, my + 14);
+      ctx.stroke();
+    }
+
+    if (state.phase === "PLAYING") {
+      const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.7);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,0.35)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
     }
 
     gameTickRef.current++;
@@ -451,19 +588,31 @@ export default function GameCanvas({
       mouseRef.current.worldY = e.clientY + cameraRef.current.y;
     };
 
-    const onClick = () => {
+    const fireShot = (targetWorldX: number, targetWorldY: number) => {
       const state = serverStateRef.current;
       if (!state || state.phase !== "PLAYING") return;
       const me = state.players.find((p) => p.id === userId);
       if (!me || !me.isHunter || !me.isAlive) return;
 
+      const aimDx = targetWorldX - localPosRef.current.x;
+      const aimDy = targetWorldY - localPosRef.current.y;
+      hunterAngleRef.current = Math.atan2(aimDy, aimDx) + Math.PI / 2;
+
+      const muzzleX = localPosRef.current.x + Math.cos(Math.atan2(aimDy, aimDx)) * 40;
+      const muzzleY = localPosRef.current.y + Math.sin(Math.atan2(aimDy, aimDx)) * 40;
+      muzzleFlashesRef.current.push({ x: muzzleX, y: muzzleY, life: 8 });
+      hitMarkersRef.current.push({ x: targetWorldX, y: targetWorldY, life: 30, hit: false });
+
+      soundManager.gunshot();
+
       send({
         type: "SHOOT",
-        payload: {
-          targetX: mouseRef.current.worldX,
-          targetY: mouseRef.current.worldY,
-        },
+        payload: { targetX: targetWorldX, targetY: targetWorldY },
       });
+    };
+
+    const onClick = () => {
+      fireShot(mouseRef.current.worldX, mouseRef.current.worldY);
     };
 
     const onTouchStart = (e: TouchEvent) => {
@@ -482,17 +631,13 @@ export default function GameCanvas({
       const rightHalf = touchX > w / 2;
 
       if (isHunter && rightHalf) {
+        const worldX = touchX + cameraRef.current.x;
+        const worldY = touchY + cameraRef.current.y;
         mouseRef.current.x = touchX;
         mouseRef.current.y = touchY;
-        mouseRef.current.worldX = touchX + cameraRef.current.x;
-        mouseRef.current.worldY = touchY + cameraRef.current.y;
-        send({
-          type: "SHOOT",
-          payload: {
-            targetX: mouseRef.current.worldX,
-            targetY: mouseRef.current.worldY,
-          },
-        });
+        mouseRef.current.worldX = worldX;
+        mouseRef.current.worldY = worldY;
+        fireShot(worldX, worldY);
       } else if (!joystickRef.current.active) {
         joystickRef.current.active = true;
         joystickRef.current.touchId = touch.identifier;
@@ -647,7 +792,7 @@ export default function GameCanvas({
                   };
                 }
               }}
-              className="w-16 h-16 rounded-full bg-blue-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform"
+              className="w-16 h-16 rounded-full bg-blue-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform select-none"
             >
               💨
             </button>
@@ -663,7 +808,7 @@ export default function GameCanvas({
                   };
                 }
               }}
-              className="w-16 h-16 rounded-full bg-purple-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform"
+              className="w-16 h-16 rounded-full bg-purple-500/80 border-2 border-white/50 text-white text-2xl flex items-center justify-center active:scale-90 transition-transform select-none"
             >
               🫥
             </button>
