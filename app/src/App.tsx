@@ -1,17 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { usePartySocket } from "partysocket/react";
 import { loadAssets, type AssetMap } from "./AssetLoader";
 import GameCanvas from "./GameCanvas";
+import { useGameSocket } from "./useGameSocket";
 import {
   type SerializedState,
   type AnimalType,
   type PerkType,
-  type ClientMessage,
   ANIMAL_OPTIONS,
   PERK_OPTIONS,
 } from "./types";
-
-const PARTYKIT_HOST = "herd-and-seek-backend.pdarleyjr.partykit.partykit.dev";
 
 type Screen = "AUTH" | "LOBBY" | "GAME";
 
@@ -25,9 +22,6 @@ export default function App() {
   const [eventLog, setEventLog] = useState<string[]>([]);
   const [selectedAnimal, setSelectedAnimal] = useState<AnimalType>("elephant");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
-  const [connected, setConnected] = useState(false);
-
-  const sendRef = useRef<((msg: ClientMessage) => void) | null>(null);
   const localPosRef = useRef({ x: 100, y: 100 });
 
   useEffect(() => {
@@ -55,13 +49,8 @@ export default function App() {
     setEventLog((prev) => [msg, ...prev].slice(0, 8));
   }, []);
 
-  const send = useCallback((msg: ClientMessage) => {
-    sendRef.current?.(msg);
-  }, []);
-
   const handleSocketMessage = useCallback(
-    (event: MessageEvent) => {
-      const data = JSON.parse(event.data);
+    (data: any) => {
       if (data.type === "SYNC_STATE" || data.type === "MATCH_START") {
         const state = data.payload as SerializedState;
         setGameState(state);
@@ -83,18 +72,7 @@ export default function App() {
     [userId, onEvent]
   );
 
-  const socket = usePartySocket({
-    host: PARTYKIT_HOST,
-    room: "lobby",
-    query: { userId, username },
-    onOpen: () => setConnected(true),
-    onClose: () => setConnected(false),
-    onMessage: handleSocketMessage,
-  });
-
-  sendRef.current = (msg: ClientMessage) => {
-    socket?.send(JSON.stringify(msg));
-  };
+  const { send, connected } = useGameSocket(userId, username, handleSocketMessage);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -261,8 +239,6 @@ export default function App() {
       <GameCanvas
         assets={assets}
         userId={userId}
-        username={username}
-        host={PARTYKIT_HOST}
         gameState={gameState}
         localPosRef={localPosRef}
         send={send}

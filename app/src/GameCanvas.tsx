@@ -31,8 +31,6 @@ interface TreeEntity {
 interface GameCanvasProps {
   assets: AssetMap;
   userId: string;
-  username: string;
-  host: string;
   gameState: SerializedState | null;
   localPosRef: React.MutableRefObject<{ x: number; y: number }>;
   send: (msg: ClientMessage) => void;
