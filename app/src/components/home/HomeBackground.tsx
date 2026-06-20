@@ -54,16 +54,44 @@ export default function HomeBackground() {
         <Cloud width={90} opacity={0.65} />
       </div>
 
-      {/* ── 4. Distant mesa / mountain silhouette (left) ── */}
+      {/* ── 4. Distant mountain range ── */}
       <svg
-        viewBox="0 0 400 160"
+        viewBox="0 0 900 260"
         className="absolute"
-        style={{ bottom: "28%", left: 0, width: "42%", opacity: 0.55 }}
+        style={{ bottom: "22%", left: 0, width: "55%", pointerEvents: "none" }}
         preserveAspectRatio="xMinYMax meet"
+        aria-hidden="true"
       >
-        {/* Distant flat-top mesa */}
-        <path d="M0 160 L0 90 Q40 60 80 75 Q110 55 140 70 Q165 40 195 60 Q210 30 240 55 Q280 20 310 50 Q340 35 380 55 L400 60 L400 160 Z" fill="#c8a86e" />
-        <path d="M0 160 L0 95 Q30 70 70 80 Q100 62 130 75 Q155 48 185 65 Q200 38 228 58 Q265 28 295 52 Q328 38 370 58 L400 65 L400 160 Z" fill="#d4b478" />
+        {/* Farthest range — pale lavender blue, barely visible */}
+        <path
+          d="M0 260 L0 180 Q60 110 130 145 Q180 85 240 125 Q290 60 360 105 Q410 45 470 90 Q520 30 580 75 Q640 55 700 88 Q750 40 820 70 L900 80 L900 260 Z"
+          fill="#99aec8"
+          opacity="0.45"
+        />
+        {/* Mid range — blue-grey, clearer peaks */}
+        <path
+          d="M0 260 L0 195 Q50 140 110 165 Q160 100 215 140 Q260 72 318 115 Q365 55 420 98 Q468 38 524 80 Q575 52 628 82 Q678 30 740 68 Q790 48 850 75 L900 82 L900 260 Z"
+          fill="#7a95b5"
+          opacity="0.62"
+        />
+        {/* Near range — darker blue-grey, defined peaks */}
+        <path
+          d="M0 260 L0 210 Q40 162 95 182 Q138 118 188 158 Q228 85 275 130 Q314 68 360 108 Q398 52 445 92 Q485 72 520 95 Q560 42 608 78 Q645 58 685 82 L900 140 L900 260 Z"
+          fill="#5d7a9e"
+          opacity="0.75"
+        />
+        {/* Snow caps on two tallest peaks */}
+        <path d="M272 130 Q278 85 284 130 Z" fill="white" opacity="0.7"/>
+        <path d="M357 108 Q363 68 368 108 Z" fill="white" opacity="0.65"/>
+        <path d="M521 95 Q527 58 533 95 Z" fill="white" opacity="0.6"/>
+        {/* Atmospheric haze at the base of the mountains */}
+        <rect x="0" y="230" width="900" height="30" fill="url(#mountainHaze)" opacity="0.5"/>
+        <defs>
+          <linearGradient id="mountainHaze" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(180,220,255,0)" />
+            <stop offset="100%" stopColor="rgba(180,220,255,0.6)" />
+          </linearGradient>
+        </defs>
       </svg>
 
       {/* ── 5. Savanna midground warm strip ── */}

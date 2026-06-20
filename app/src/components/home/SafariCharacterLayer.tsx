@@ -50,81 +50,81 @@ export default function SafariCharacterLayer() {
   );
 }
 
-// ── Hunter SVG: crouched prone, facing right, safari hat, rifle ──
+// ── Hunter SVG: crouching behind rocks, head + rifle peeking over cover ──
+// This pose reads clearly at any size: hat silhouette above the rocks, barrel pointing right.
 function HunterSvg() {
   return (
-    <svg viewBox="0 0 280 180" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 260 200" xmlns="http://www.w3.org/2000/svg">
       {/* Ground shadow */}
-      <ellipse cx="140" cy="172" rx="110" ry="10" fill="rgba(0,0,0,0.25)" />
+      <ellipse cx="115" cy="193" rx="100" ry="8" fill="rgba(0,0,0,0.22)" />
 
-      {/* Rocks for cover */}
-      <ellipse cx="60"  cy="155" rx="52" ry="28" fill="#7a6e58" />
-      <ellipse cx="55"  cy="148" rx="46" ry="22" fill="#928470" />
-      <ellipse cx="65"  cy="145" rx="38" ry="18" fill="#a8967c" />
-      <ellipse cx="38"  cy="158" rx="32" ry="16" fill="#7a6e58" />
+      {/* Grass tufts — in front of and around rocks */}
+      <path d="M8  192 Q14 155 20 192" stroke="#2e8a18" strokeWidth="7"  fill="none" strokeLinecap="round"/>
+      <path d="M22 192 Q30 148 38 192" stroke="#3aaa20" strokeWidth="8"  fill="none" strokeLinecap="round"/>
+      <path d="M44 192 Q50 160 56 192" stroke="#248010" strokeWidth="6"  fill="none" strokeLinecap="round"/>
+      <path d="M62 192 Q68 158 73 192" stroke="#3aaa20" strokeWidth="6"  fill="none" strokeLinecap="round"/>
+      <path d="M90 192 Q95 162 100 192" stroke="#2e8a18" strokeWidth="5" fill="none" strokeLinecap="round"/>
 
-      {/* Tall grass tufts around the rock */}
-      <path d="M15 162 Q20 128 26 162"  stroke="#2e8a18" strokeWidth="7" fill="none" strokeLinecap="round"/>
-      <path d="M28 162 Q36 120 42 162"  stroke="#3aaa20" strokeWidth="8" fill="none" strokeLinecap="round"/>
-      <path d="M8  162 Q14 138 18 162"  stroke="#248010" strokeWidth="5" fill="none" strokeLinecap="round"/>
-      <path d="M44 162 Q52 118 58 162"  stroke="#3aaa20" strokeWidth="7" fill="none" strokeLinecap="round"/>
-      <path d="M80 162 Q86 132 90 162"  stroke="#2e8a18" strokeWidth="6" fill="none" strokeLinecap="round"/>
-      <path d="M100 162 Q104 140 107 162" stroke="#3aaa20" strokeWidth="5" fill="none" strokeLinecap="round"/>
+      {/* Rock mound — hunter crouches behind this wall */}
+      <ellipse cx="78"  cy="172" rx="72" ry="34" fill="#7a6e58" />
+      <ellipse cx="72"  cy="163" rx="65" ry="27" fill="#928470" />
+      <ellipse cx="80"  cy="158" rx="58" ry="22" fill="#b0a07c" />
+      {/* Lighter crest on top of rocks */}
+      <ellipse cx="78"  cy="152" rx="50" ry="10" fill="#c0b090" opacity="0.6"/>
 
-      {/* Body — torso lying prone, angled up slightly to right */}
-      <path d="M55 148 Q100 130 175 128 Q185 128 190 134 Q185 144 170 146 Q120 148 70 158 Q58 160 52 155 Z" fill="#8b7850" />
-      {/* Body shading */}
-      <path d="M60 135 Q110 122 170 122" stroke="#6a5a38" strokeWidth="4" fill="none" opacity="0.4"/>
+      {/* Hunter body — hidden behind rocks, only shoulders visible */}
+      <path
+        d="M42 158 Q68 140 105 138 Q118 137 125 142 Q118 152 105 154 Q70 158 48 165 Z"
+        fill="#8b7850"
+      />
 
-      {/* Legs (below body, khaki) */}
-      <path d="M55 153 Q40 165 30 168" stroke="#7a6a40" strokeWidth="14" fill="none" strokeLinecap="round"/>
-      <path d="M70 155 Q60 168 50 172" stroke="#8a7a50" strokeWidth="12" fill="none" strokeLinecap="round"/>
-      {/* Boots */}
-      <ellipse cx="30" cy="168" rx="14" ry="7" fill="#4a3820" />
-      <ellipse cx="50" cy="172" rx="12" ry="6" fill="#4a3820" />
+      {/* Left arm resting on top of rock, holding rifle forward */}
+      <path d="M98 145 Q128 136 162 136" stroke="#8b7850" strokeWidth="15" fill="none" strokeLinecap="round"/>
+      {/* Left hand gripping rifle */}
+      <circle cx="162" cy="136" r="10" fill="#c8956b"/>
 
-      {/* Left arm extending forward with rifle */}
-      <path d="M170 132 Q210 118 240 112" stroke="#8b7850" strokeWidth="11" fill="none" strokeLinecap="round"/>
-      {/* Rifle stock */}
-      <rect x="175" y="118" width="55" height="10" rx="4" fill="#5c3c18" transform="rotate(-8 175 118)"/>
-      {/* Rifle barrel — extends right */}
-      <rect x="225" y="110" width="52" height="6" rx="3" fill="#2a2a2a" transform="rotate(-8 225 110)"/>
+      {/* Second hand near barrel */}
+      <circle cx="128" cy="140" r="9"  fill="#b88050"/>
+
+      {/* Rifle: stock + body + long barrel pointing right */}
+      <rect x="128" y="128" width="40" height="13" rx="5"  fill="#5c3c18"/>
+      <rect x="164" y="127" width="78" height="9"  rx="3.5" fill="#2a2a2a"/>
       {/* Scope */}
-      <rect x="228" y="105" width="22" height="9" rx="3" fill="#1a1a1a" transform="rotate(-8 228 105)"/>
-      <rect x="237" y="102" width="6" height="5" rx="2" fill="#333" transform="rotate(-8 237 102)"/>
-      {/* Muzzle tip */}
-      <circle cx="274" cy="108" r="4" fill="#1a1a1a" transform="rotate(-8 274 108)"/>
+      <rect x="172" y="121" width="24" height="10" rx="3"  fill="#1a1a1a"/>
+      <rect x="181" y="118" width="8"  height="6"  rx="2"  fill="#333"/>
+      {/* Muzzle flash guard tip */}
+      <rect x="238" y="128" width="4"  height="7"  rx="1"  fill="#1a1a1a"/>
 
-      {/* Right arm propped on rock */}
-      <path d="M155 138 Q145 148 138 152" stroke="#8b7850" strokeWidth="11" fill="none" strokeLinecap="round"/>
-      {/* Hand/glove */}
-      <circle cx="135" cy="153" r="9" fill="#7a6a50" />
+      {/* Neck connecting shoulder to head */}
+      <rect x="100" y="120" width="18" height="22" rx="9" fill="#c8956b"/>
 
-      {/* Head */}
-      <circle cx="186" cy="116" r="22" fill="#d4956a" />
-      {/* Shadow on face */}
-      <path d="M172 110 Q186 105 200 112" fill="#c08050" />
+      {/* Head — clear side profile, facing right */}
+      <circle cx="114" cy="106" r="26" fill="#d4956a"/>
+      {/* Face shading (jaw/cheek shadow) */}
+      <path d="M102 112 Q114 120 128 114" fill="#c08050" opacity="0.4"/>
       {/* Ear */}
-      <ellipse cx="166" cy="118" rx="6" ry="8" fill="#c88050" />
+      <ellipse cx="94" cy="108" rx="7" ry="9" fill="#c48860"/>
 
-      {/* Safari hat — brim */}
-      <ellipse cx="188" cy="100" rx="30" ry="9" fill="#7a5818" />
-      {/* Hat crown */}
-      <path d="M164 100 Q168 74 188 70 Q208 74 212 100 Z" fill="#96721e" />
+      {/* Safari hat — distinctive large brim is key at small sizes */}
+      {/* Brim — wide flat ellipse */}
+      <ellipse cx="116" cy="86"  rx="36" ry="11" fill="#7a5818"/>
+      {/* Crown */}
+      <path d="M88 86 Q90 58 115 53 Q140 58 142 86 Z" fill="#96721e"/>
       {/* Hat band */}
-      <rect x="164" y="97" width="48" height="6" rx="3" fill="#5a3c0a" />
-      {/* Hat shine */}
-      <ellipse cx="182" cy="80" rx="10" ry="5" fill="rgba(255,220,120,0.2)" transform="rotate(-10 182 80)"/>
+      <rect x="88" y="82" width="54" height="7" rx="3" fill="#5a3c0a"/>
+      {/* Subtle highlight on crown */}
+      <ellipse cx="110" cy="66" rx="12" ry="5" fill="rgba(255,210,100,0.22)" />
 
-      {/* Eye (visible) */}
-      <ellipse cx="196" cy="118" rx="5" ry="4" fill="#fffde0"/>
-      <circle cx="197" cy="118" r="3" fill="#2a1808"/>
-      <circle cx="198" cy="117" r="1" fill="white"/>
+      {/* Eye — single dot in profile, gives life to the face */}
+      <circle cx="130" cy="108" r="4.5" fill="#fffde0"/>
+      <circle cx="131" cy="108" r="3"   fill="#1a1008"/>
+      <circle cx="132" cy="107" r="1.2" fill="white"/>
 
-      {/* Nose */}
-      <ellipse cx="202" cy="124" rx="4" ry="3" fill="#b87050"/>
-      {/* Mouth — focused grimace */}
-      <path d="M193 128 Q200 131 205 128" stroke="#8a5030" strokeWidth="2" fill="none" strokeLinecap="round"/>
+      {/* Nose profile */}
+      <path d="M136 112 Q140 118 137 122" stroke="#b07050" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+
+      {/* Focused mouth */}
+      <path d="M126 120 Q134 124 138 121" stroke="#8a5030" strokeWidth="2" fill="none" strokeLinecap="round"/>
     </svg>
   );
 }
