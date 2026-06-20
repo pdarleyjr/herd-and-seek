@@ -169,6 +169,52 @@ export default function SvgTree({ className = "" }: { className?: string }) {
       <path d="M100 155 Q98 170 102 182" stroke="#1a6009" strokeWidth="2" fill="none" opacity="0.6"/>
       <path d="M115 162 Q113 178 118 190" stroke="#1a6009" strokeWidth="2" fill="none" opacity="0.5"/>
       <path d="M240 148 Q242 162 238 174" stroke="#1a6009" strokeWidth="2" fill="none" opacity="0.6"/>
+
+      {/* ── Leaf clusters on the two bare side branches ── */}
+
+      {/* LEFT branch tip: M148 295 Q105 268 72 240 → tip at ~(72,240) */}
+      {/* Background shadow blobs */}
+      <ellipse cx="66"  cy="235" rx="30" ry="18" fill="#0d4005" opacity="0.7" />
+      <ellipse cx="82"  cy="245" rx="24" ry="15" fill="#0d4005" opacity="0.6" />
+      <ellipse cx="56"  cy="248" rx="22" ry="14" fill="#0d4005" opacity="0.55"/>
+      {/* Mid green */}
+      <ellipse cx="66"  cy="232" rx="28" ry="17" fill="#1a6009" />
+      <ellipse cx="82"  cy="242" rx="22" ry="14" fill="#1a6009" />
+      <ellipse cx="54"  cy="244" rx="20" ry="13" fill="#1a6009" />
+      {/* Bright top */}
+      <ellipse cx="65"  cy="227" rx="24" ry="14" fill="#2d8c14" />
+      <ellipse cx="80"  cy="237" rx="19" ry="12" fill="#2d8c14" />
+      <ellipse cx="53"  cy="239" rx="18" ry="11" fill="#2d8c14" />
+      {/* Lime highlight */}
+      <ellipse cx="64"  cy="222" rx="18" ry="10" fill="#4ec028" />
+      <ellipse cx="78"  cy="231" rx="14" ry="8"  fill="#4ec028" />
+      {/* Sunlit glint */}
+      <ellipse cx="60"  cy="218" rx="10" ry="6"  fill="#80f040" opacity="0.55"/>
+      {/* Sub-branch leaves at ~(75,232) and (88,254) */}
+      <ellipse cx="90"  cy="254" rx="16" ry="10" fill="#1a6009" />
+      <ellipse cx="90"  cy="251" rx="13" ry="8"  fill="#38a01c" />
+      <ellipse cx="76"  cy="232" rx="12" ry="8"  fill="#2d8c14" />
+
+      {/* RIGHT branch tip: M192 285 Q235 255 268 225 → tip at ~(268,225) */}
+      <ellipse cx="274" cy="220" rx="30" ry="18" fill="#0d4005" opacity="0.7" />
+      <ellipse cx="258" cy="230" rx="24" ry="15" fill="#0d4005" opacity="0.6" />
+      <ellipse cx="284" cy="232" rx="22" ry="14" fill="#0d4005" opacity="0.55"/>
+      {/* Mid green */}
+      <ellipse cx="274" cy="217" rx="28" ry="17" fill="#1a6009" />
+      <ellipse cx="258" cy="227" rx="22" ry="14" fill="#1a6009" />
+      <ellipse cx="284" cy="229" rx="20" ry="13" fill="#1a6009" />
+      {/* Bright top */}
+      <ellipse cx="275" cy="212" rx="24" ry="14" fill="#2d8c14" />
+      <ellipse cx="259" cy="222" rx="19" ry="12" fill="#2d8c14" />
+      <ellipse cx="285" cy="224" rx="18" ry="11" fill="#2d8c14" />
+      {/* Lime highlight */}
+      <ellipse cx="275" cy="207" rx="18" ry="10" fill="#4ec028" />
+      <ellipse cx="260" cy="217" rx="14" ry="8"  fill="#4ec028" />
+      {/* Sunlit glint */}
+      <ellipse cx="272" cy="203" rx="10" ry="6"  fill="#80f040" opacity="0.55"/>
+      {/* Sub-branch leaves at ~(258,238) */}
+      <ellipse cx="258" cy="238" rx="16" ry="10" fill="#1a6009" />
+      <ellipse cx="258" cy="235" rx="13" ry="8"  fill="#38a01c" />
     </svg>
   );
 }

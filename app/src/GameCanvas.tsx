@@ -145,6 +145,12 @@ export default function GameCanvas({
   const remoteRenderRef = useRef<Map<string, { renderX: number; renderY: number; targetX: number; targetY: number }>>(new Map());
   const movePointerIdRef = useRef<number | null>(null);
   const aimPointerIdRef = useRef<number | null>(null);
+  // Track aim touch start for tap-vs-drag detection
+  const aimTapStartTimeRef = useRef(0);
+  const aimTapStartXRef = useRef(0);
+  const aimTapStartYRef = useRef(0);
+  // World-space position of current aim target (used for crosshair rendering)
+  const aimTargetRef = useRef<{ worldX: number; worldY: number } | null>(null);
 
   const [isMobile] = useState(() => isTouchDevice());
   const lastTimeRef = useRef(0);
@@ -796,11 +802,28 @@ if (me && me.isAlive && me.isHunter) {
     }
 
     if (me && me.isHunter && me.isAlive) {
-      const CROSSHAIR_DIST = 180;
-      const crosshairWorldX = localPosRef.current.x + Math.cos(aimAngleRef.current) * CROSSHAIR_DIST;
-      const crosshairWorldY = localPosRef.current.y + Math.sin(aimAngleRef.current) * CROSSHAIR_DIST;
+      // Use actual aim target world position (tap position) when available; fall back to angle-based
+      const crosshairWorldX = aimTargetRef.current ? aimTargetRef.current.worldX
+        : (isMobile ? localPosRef.current.x + Math.cos(aimAngleRef.current) * 200 : mouseRef.current.worldX);
+      const crosshairWorldY = aimTargetRef.current ? aimTargetRef.current.worldY
+        : (isMobile ? localPosRef.current.y + Math.sin(aimAngleRef.current) * 200 : mouseRef.current.worldY);
       const mx = crosshairWorldX - camX;
       const my = crosshairWorldY - camY;
+
+      // Draw faint tracer line from hunter to crosshair so aim direction is obvious
+      const hunterSX = localPosRef.current.x - camX;
+      const hunterSY = localPosRef.current.y - camY;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 80, 80, 0.22)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(hunterSX, hunterSY);
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
       const pulse = Math.sin(gameTickRef.current * 0.15) * 3;
       ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
       ctx.lineWidth = 2;
@@ -878,31 +901,45 @@ decoysRef.current.push({
     }
   }, [userId, send, localPosRef]);
 
-const fireShot = useCallback(() => {
+// targetWorldX/Y = explicit tap position (mobile tap-to-fire)
+   // omit both to fire along current aimAngleRef (fire button / keyboard)
+   const fireShot = useCallback((targetWorldX?: number, targetWorldY?: number) => {
      const state = serverStateRef.current;
      if (!state || state.phase !== "PLAYING") return;
      const me = state.players.find((p) => p.id === userId);
      if (!me || !me.isHunter || !me.isAlive) return;
 
-     const SHOT_RANGE = 800;
-     const angle = aimAngleRef.current;
-     const targetX = localPosRef.current.x + Math.cos(angle) * SHOT_RANGE;
-     const targetY = localPosRef.current.y + Math.sin(angle) * SHOT_RANGE;
+     let tX: number;
+     let tY: number;
 
-     hunterAngleRef.current = angle + Math.PI / 2;
+     if (targetWorldX !== undefined && targetWorldY !== undefined) {
+       // Tap-to-fire: shoot exactly at the tapped world position
+       tX = targetWorldX;
+       tY = targetWorldY;
+     } else {
+       // Fire button / keyboard: fire along current aim angle
+       const SHOT_RANGE = 800;
+       const angle = aimAngleRef.current;
+       tX = localPosRef.current.x + Math.cos(angle) * SHOT_RANGE;
+       tY = localPosRef.current.y + Math.sin(angle) * SHOT_RANGE;
+     }
 
-     const muzzleX = localPosRef.current.x + Math.cos(angle) * 40;
-     const muzzleY = localPosRef.current.y + Math.sin(angle) * 40;
-     muzzleFlashesRef.current.push({ x: muzzleX, y: muzzleY, life: 8 });
-     hitMarkersRef.current.push({ x: targetX, y: targetY, life: 30, hit: false });
+     // Update aim angle and hunter rotation toward the shot direction
+     const dx = tX - localPosRef.current.x;
+     const dy = tY - localPosRef.current.y;
+     aimAngleRef.current = Math.atan2(dy, dx);
+     hunterAngleRef.current = aimAngleRef.current + Math.PI / 2;
+
+     // Keep crosshair at the fired position
+     aimTargetRef.current = { worldX: tX, worldY: tY };
+
+     const muzzle = { x: localPosRef.current.x + Math.cos(aimAngleRef.current) * 40, y: localPosRef.current.y + Math.sin(aimAngleRef.current) * 40 };
+     muzzleFlashesRef.current.push({ x: muzzle.x, y: muzzle.y, life: 8 });
+     hitMarkersRef.current.push({ x: tX, y: tY, life: 30, hit: false });
 
      soundManager.gunshot();
-
-     send({
-       type: "SHOOT",
-       payload: { targetX, targetY },
-     });
-   }, [userId, send, localPosRef, aimAngleRef]);
+     send({ type: "SHOOT", payload: { targetX: tX, targetY: tY } });
+   }, [userId, send, localPosRef, aimAngleRef, aimTargetRef]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -954,7 +991,7 @@ const fireShot = useCallback(() => {
       fireShot();
     };
 
-    // Pointer events replace TouchEvent for better multi-touch tracking
+    // ── Pointer events (iOS-safe: no setPointerCapture on aim zone) ──
     const onPointerDown = (e: PointerEvent) => {
       const state = serverStateRef.current;
       if (!state || state.phase !== "PLAYING") return;
@@ -962,12 +999,12 @@ const fireShot = useCallback(() => {
       if (!me || !me.isAlive) return;
 
       const w = window.innerWidth;
-      // Animals use whole screen as joystick; hunters: left 45% = move, right 55% = aim
       const isMovementZone = !me.isHunter || e.clientX < w * 0.45;
       const isAimZone = me.isHunter && e.clientX >= w * 0.45;
 
       if (isMovementZone && movePointerIdRef.current === null) {
-        canvas.setPointerCapture(e.pointerId);
+        // Keep pointer capture for joystick so dragging stays smooth
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* iOS may reject */ }
         movePointerIdRef.current = e.pointerId;
         joystickRef.current.active = true;
         joystickRef.current.touchId = e.pointerId;
@@ -975,27 +1012,22 @@ const fireShot = useCallback(() => {
         joystickRef.current.originY = e.clientY;
         joystickRef.current.dx = 0;
         joystickRef.current.dy = 0;
-        setJoystickVisual({
-          visible: true,
-          originX: e.clientX,
-          originY: e.clientY,
-          knobX: e.clientX,
-          knobY: e.clientY,
-        });
+        setJoystickVisual({ visible: true, originX: e.clientX, originY: e.clientY, knobX: e.clientX, knobY: e.clientY });
       } else if (isAimZone && aimPointerIdRef.current === null) {
-        canvas.setPointerCapture(e.pointerId);
+        // No setPointerCapture on aim — lets fire button receive its own pointer events on iOS
         aimPointerIdRef.current = e.pointerId;
+        aimTapStartTimeRef.current = Date.now();
+        aimTapStartXRef.current = e.clientX;
+        aimTapStartYRef.current = e.clientY;
+
         const worldX = e.clientX + cameraRef.current.x;
         const worldY = e.clientY + cameraRef.current.y;
-        aimRef.current.active = true;
-        aimRef.current.touchId = e.pointerId;
-        aimRef.current.currentX = e.clientX;
-        aimRef.current.currentY = e.clientY;
-        aimRef.current.worldX = worldX;
-        aimRef.current.worldY = worldY;
+        aimTargetRef.current = { worldX, worldY };
+
         const aimDx = worldX - localPosRef.current.x;
         const aimDy = worldY - localPosRef.current.y;
         aimAngleRef.current = Math.atan2(aimDy, aimDx);
+        hunterAngleRef.current = aimAngleRef.current + Math.PI / 2;
         mouseRef.current.x = e.clientX;
         mouseRef.current.y = e.clientY;
         mouseRef.current.worldX = worldX;
@@ -1014,34 +1046,21 @@ const fireShot = useCallback(() => {
           const angle = Math.atan2(dy, dx);
           joystickRef.current.dx = Math.cos(angle);
           joystickRef.current.dy = Math.sin(angle);
-          setJoystickVisual((prev) => ({
-            ...prev,
-            knobX: prev.originX + Math.cos(angle) * maxDist,
-            knobY: prev.originY + Math.sin(angle) * maxDist,
-          }));
+          setJoystickVisual((prev) => ({ ...prev, knobX: prev.originX + Math.cos(angle) * maxDist, knobY: prev.originY + Math.sin(angle) * maxDist }));
         } else {
           joystickRef.current.dx = dx / maxDist;
           joystickRef.current.dy = dy / maxDist;
-          setJoystickVisual((prev) => ({
-            ...prev,
-            knobX: e.clientX,
-            knobY: e.clientY,
-          }));
+          setJoystickVisual((prev) => ({ ...prev, knobX: e.clientX, knobY: e.clientY }));
         }
       } else if (aimPointerIdRef.current === e.pointerId) {
         const worldX = e.clientX + cameraRef.current.x;
         const worldY = e.clientY + cameraRef.current.y;
-        aimRef.current.currentX = e.clientX;
-        aimRef.current.currentY = e.clientY;
-        aimRef.current.worldX = worldX;
-        aimRef.current.worldY = worldY;
-        // Smooth angle interpolation toward drag direction
+        // Track aim target at the actual touch position
+        aimTargetRef.current = { worldX, worldY };
         const aimDx = worldX - localPosRef.current.x;
         const aimDy = worldY - localPosRef.current.y;
-        const targetAngle = Math.atan2(aimDy, aimDx);
-        const diff = targetAngle - aimAngleRef.current;
-        const wrapped = ((diff + Math.PI) % (Math.PI * 2)) - Math.PI;
-        aimAngleRef.current += wrapped * 0.3;
+        aimAngleRef.current = Math.atan2(aimDy, aimDx);
+        hunterAngleRef.current = aimAngleRef.current + Math.PI / 2;
         mouseRef.current.x = e.clientX;
         mouseRef.current.y = e.clientY;
         mouseRef.current.worldX = worldX;
@@ -1062,6 +1081,19 @@ const fireShot = useCallback(() => {
         aimPointerIdRef.current = null;
         aimRef.current.active = false;
         aimRef.current.touchId = null;
+
+        // TAP = short duration (<350ms) AND small movement (<35px) → fire at that position
+        const elapsed = Date.now() - aimTapStartTimeRef.current;
+        const moveDx = e.clientX - aimTapStartXRef.current;
+        const moveDy = e.clientY - aimTapStartYRef.current;
+        const moveDist = Math.sqrt(moveDx * moveDx + moveDy * moveDy);
+
+        if (elapsed < 350 && moveDist < 35) {
+          const worldX = e.clientX + cameraRef.current.x;
+          const worldY = e.clientY + cameraRef.current.y;
+          fireShot(worldX, worldY);
+        }
+        // Drag: keep aim target visible, don't auto-fire
         setAimVisual({ visible: false, x: 0, y: 0 });
       }
     };
@@ -1130,32 +1162,52 @@ const fireShot = useCallback(() => {
         <div
           className="absolute z-5 pointer-events-none"
           style={{
-            left: aimVisual.x - 30,
-            top: aimVisual.y - 30,
-            width: 60,
-            height: 60,
+            left: aimVisual.x - 40,
+            top: aimVisual.y - 40,
+            width: 80,
+            height: 80,
           }}
         >
-          <div className="absolute inset-0 rounded-full border-2 border-red-400/80 bg-red-500/10" />
-          <div className="absolute left-1/2 top-0 h-full w-px bg-red-400/80" />
-          <div className="absolute top-1/2 left-0 h-px w-full bg-red-400/80" />
+          {/* Outer ring */}
+          <div className="absolute inset-0 rounded-full border-2 border-red-400/90" style={{ boxShadow: "0 0 10px rgba(255,60,60,0.5)" }} />
+          {/* Inner dot */}
+          <div className="absolute" style={{ left: "50%", top: "50%", width: 8, height: 8, marginLeft: -4, marginTop: -4, borderRadius: "50%", background: "rgba(255,80,80,0.9)" }} />
+          {/* Cross-hairs */}
+          <div className="absolute" style={{ left: "50%", top: 4, width: 2, height: "calc(50% - 8px)", marginLeft: -1, background: "rgba(255,80,80,0.8)" }} />
+          <div className="absolute" style={{ left: "50%", bottom: 4, width: 2, height: "calc(50% - 8px)", marginLeft: -1, background: "rgba(255,80,80,0.8)" }} />
+          <div className="absolute" style={{ top: "50%", left: 4, height: 2, width: "calc(50% - 8px)", marginTop: -1, background: "rgba(255,80,80,0.8)" }} />
+          <div className="absolute" style={{ top: "50%", right: 4, height: 2, width: "calc(50% - 8px)", marginTop: -1, background: "rgba(255,80,80,0.8)" }} />
         </div>
       )}
 
       {isMobile && currentMe?.isHunter && gameState?.phase === "PLAYING" && (
-        <div className="absolute bottom-4 right-4 z-10">
-          <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              fireShot();
-            }}
-            className="w-16 h-16 rounded-full bg-red-500/80 border-2 border-red-400/80 flex items-center justify-center active:scale-95 transition select-none"
-            style={{ touchAction: "manipulation" }}
+        <>
+          {/* Hunter hint — top of right half */}
+          <div
+            className="absolute top-20 z-10 pointer-events-none text-center"
+            style={{ left: "45%", right: 0 }}
           >
-            <span className="text-red-200 text-2xl">🔫</span>
-          </button>
-        </div>
+            <span className="inline-block bg-black/60 text-white/80 text-xs px-3 py-1 rounded-full">
+              👆 Tap to shoot · Drag to aim
+            </span>
+          </div>
+
+          {/* Fire button — larger, centered bottom-right, fires along current aim */}
+          <div className="absolute bottom-6 z-10" style={{ right: "calc(27.5% - 40px)" }}>
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fireShot();
+              }}
+              className="w-20 h-20 rounded-full bg-red-600/90 border-4 border-red-300/90 flex flex-col items-center justify-center active:scale-90 transition-transform select-none shadow-[0_0_20px_rgba(255,60,60,0.5)]"
+              style={{ touchAction: "manipulation" }}
+            >
+              <span className="text-3xl">🔫</span>
+              <span className="text-white text-[10px] font-bold leading-tight">FIRE</span>
+            </button>
+          </div>
+        </>
       )}
 
 {/* Perk button - bottom center for animals */}
