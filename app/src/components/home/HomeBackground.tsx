@@ -54,44 +54,95 @@ export default function HomeBackground() {
         <Cloud width={90} opacity={0.65} />
       </div>
 
-      {/* ── 4. Distant mountain range ── */}
+      {/* ── 4. Distant mountain range — full width, sharp triangular peaks ── */}
       <svg
-        viewBox="0 0 900 260"
-        className="absolute"
-        style={{ bottom: "22%", left: 0, width: "55%", pointerEvents: "none" }}
-        preserveAspectRatio="xMinYMax meet"
+        viewBox="0 0 1400 380"
+        className="absolute left-0 right-0"
+        style={{ bottom: "20%", width: "100%", height: "38%", pointerEvents: "none" }}
+        preserveAspectRatio="none"
         aria-hidden="true"
       >
-        {/* Farthest range — pale lavender blue, barely visible */}
-        <path
-          d="M0 260 L0 180 Q60 110 130 145 Q180 85 240 125 Q290 60 360 105 Q410 45 470 90 Q520 30 580 75 Q640 55 700 88 Q750 40 820 70 L900 80 L900 260 Z"
-          fill="#99aec8"
-          opacity="0.45"
-        />
-        {/* Mid range — blue-grey, clearer peaks */}
-        <path
-          d="M0 260 L0 195 Q50 140 110 165 Q160 100 215 140 Q260 72 318 115 Q365 55 420 98 Q468 38 524 80 Q575 52 628 82 Q678 30 740 68 Q790 48 850 75 L900 82 L900 260 Z"
-          fill="#7a95b5"
-          opacity="0.62"
-        />
-        {/* Near range — darker blue-grey, defined peaks */}
-        <path
-          d="M0 260 L0 210 Q40 162 95 182 Q138 118 188 158 Q228 85 275 130 Q314 68 360 108 Q398 52 445 92 Q485 72 520 95 Q560 42 608 78 Q645 58 685 82 L900 140 L900 260 Z"
-          fill="#5d7a9e"
-          opacity="0.75"
-        />
-        {/* Snow caps on two tallest peaks */}
-        <path d="M272 130 Q278 85 284 130 Z" fill="white" opacity="0.7"/>
-        <path d="M357 108 Q363 68 368 108 Z" fill="white" opacity="0.65"/>
-        <path d="M521 95 Q527 58 533 95 Z" fill="white" opacity="0.6"/>
-        {/* Atmospheric haze at the base of the mountains */}
-        <rect x="0" y="230" width="900" height="30" fill="url(#mountainHaze)" opacity="0.5"/>
         <defs>
-          <linearGradient id="mountainHaze" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(180,220,255,0)" />
-            <stop offset="100%" stopColor="rgba(180,220,255,0.6)" />
+          <linearGradient id="farMtnGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#c0d4ec"/>
+            <stop offset="100%" stopColor="#8aaed0"/>
+          </linearGradient>
+          <linearGradient id="midMtnGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#8aaad0"/>
+            <stop offset="100%" stopColor="#5a80a8"/>
+          </linearGradient>
+          <linearGradient id="nearMtnGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6080a0"/>
+            <stop offset="100%" stopColor="#3a5870"/>
           </linearGradient>
         </defs>
+
+        {/* Far range — light blue-grey, gentle but pointed peaks */}
+        <path
+          d="M0 380 L0 260
+             L70 220 L140 165 L200 210
+             L280 140 L340 195
+             L420 115 L480 170
+             L560 100 L610 155
+             L680 120 L740 160
+             L820 90  L880 140
+             L950 110 L1010 150
+             L1090 125 L1150 160
+             L1230 105 L1290 155
+             L1360 130 L1400 145
+             L1400 380 Z"
+          fill="url(#farMtnGrad)"
+          opacity="0.55"
+        />
+
+        {/* Mid range — medium blue-grey, sharper peaks */}
+        <path
+          d="M0 380 L0 300
+             L60 268 L110 225 L165 265
+             L230 195 L285 240
+             L350 165 L400 215
+             L465 145 L515 195
+             L575 162 L625 198
+             L685 148 L730 182
+             L795 135 L845 175
+             L910 152 L960 185
+             L1025 145 L1075 180
+             L1140 158 L1190 190
+             L1260 148 L1320 178
+             L1380 155 L1400 165
+             L1400 380 Z"
+          fill="url(#midMtnGrad)"
+          opacity="0.70"
+        />
+
+        {/* Near range — darker, tallest visible peaks, cleanest silhouette */}
+        <path
+          d="M0 380 L0 330
+             L50 308 L95 278 L140 310
+             L195 255 L245 295
+             L305 235 L355 272
+             L415 215 L460 258
+             L515 240 L555 268
+             L608 225 L648 260
+             L700 238 L740 265
+             L800 218 L848 255
+             L905 235 L950 265
+             L1010 238 L1055 268
+             L1115 228 L1165 262
+             L1230 240 L1285 268
+             L1350 245 L1400 258
+             L1400 380 Z"
+          fill="url(#nearMtnGrad)"
+          opacity="0.82"
+        />
+
+        {/* Snow caps — white triangles on the three sharpest far/mid peaks */}
+        <polygon points="560,100 585,148 535,148" fill="white" opacity="0.80"/>
+        <polygon points="820,90  848,135 792,135" fill="white" opacity="0.75"/>
+        <polygon points="1230,105 1258,152 1202,152" fill="white" opacity="0.70"/>
+        {/* Lighter snow on mid-range peaks */}
+        <polygon points="350,165 368,200 332,200" fill="rgba(255,255,255,0.55)"/>
+        <polygon points="685,148 702,180 668,180" fill="rgba(255,255,255,0.50)"/>
       </svg>
 
       {/* ── 5. Savanna midground warm strip ── */}
