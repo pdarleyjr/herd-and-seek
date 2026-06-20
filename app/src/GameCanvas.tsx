@@ -632,6 +632,7 @@ const updateLocalPlayer = useCallback(() => {
       shadow: boolean;
       alpha: number;
       glow: string | null;
+      flipX?: boolean; // mirror sprite horizontally (moving-left animals)
     }
     const renderArray: RenderItem[] = [];
 
@@ -644,13 +645,13 @@ const updateLocalPlayer = useCallback(() => {
         x: npc.x,
         y: npc.y,
         img: getAnimalImage(assets, npc.animalType),
-        
         rotation: 0,
         size: 64,
         isEntity: true,
         shadow: true,
         alpha: 1,
         glow: null,
+        flipX: npc.vx < -0.1, // mirror when moving left
       });
     }
 
@@ -796,6 +797,7 @@ for (const item of renderArray) {
         ctx.globalAlpha = item.alpha;
         ctx.translate(screenX, screenY);
         if (item.rotation !== 0) ctx.rotate(item.rotation);
+        if (item.flipX) ctx.scale(-1, 1); // mirror for leftward-moving sprites
         ctx.drawImage(item.img, -item.size / 2, -item.size / 2, item.size, item.size);
         ctx.restore();
       }
@@ -865,32 +867,190 @@ if (me && me.isAlive && me.isHunter) {
       ctx.textBaseline = "alphabetic";
     }
 
-    // Minimap
-    const mapSize = 120;
-    const mapX = 10;
-    const mapY = 10;
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(mapX, mapY, mapSize, mapSize);
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    // ── Minimap — role-aware with hunter radar mechanic ──────────────
+    const MM = 134;   // minimap size
+    const MX = 10;    // top-left x
+    const MY = 10;    // top-left y
+    const INSET = 16; // label header height
+
+    // Radar timing: 10-second total cycle (5s reveal + 5s scan)
+    const CYCLE_MS = 10_000;
+    const REVEAL_MS = 5_000;
+    const nowMsMap = Date.now();
+    const radarPhase = nowMsMap % CYCLE_MS;
+    const radarRevealed = radarPhase < REVEAL_MS;
+    const msTillChange = radarRevealed ? REVEAL_MS - radarPhase : CYCLE_MS - radarPhase;
+    const secsTillChange = Math.ceil(msTillChange / 1000);
+
+    const isHunterLocal = me?.isHunter ?? false;
+
+    // Background
+    ctx.fillStyle = isHunterLocal
+      ? (radarRevealed ? "rgba(35,4,4,0.88)" : "rgba(2,4,25,0.88)")
+      : "rgba(2,16,2,0.85)";
+    ctx.fillRect(MX, MY, MM, MM);
+
+    // Border — colour signals radar state
+    ctx.strokeStyle = isHunterLocal
+      ? (radarRevealed ? "rgba(255,100,30,0.9)" : "rgba(80,140,255,0.7)")
+      : "rgba(80,220,80,0.55)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(MX, MY, MM, MM);
+
+    // Header label
+    ctx.fillStyle = isHunterLocal
+      ? (radarRevealed ? "#ff8844" : "#7aadff")
+      : "#6fff6f";
+    ctx.font = "bold 8px system-ui";
+    ctx.textAlign = "center";
+    const mmLabel = isHunterLocal
+      ? (radarRevealed ? "▶ RADAR ACTIVE" : "◌ SCANNING...")
+      : "▲ YOUR LOCATION";
+    ctx.fillText(mmLabel, MX + MM / 2, MY + 9);
+    ctx.textAlign = "left";
+
+    // Content area (below label)
+    const CX = MX + 4;
+    const CY = MY + INSET;
+    const CS = MM - 8; // content width/height
+
+    // Clip to content area for sweep
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(CX, CY, CS, CS);
+    ctx.clip();
+
+    // Map boundary
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
     ctx.lineWidth = 1;
-    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
+    ctx.strokeRect(CX, CY, CS, CS);
 
-    for (const p of state.players) {
-      if (!p.isAlive) continue;
-      const mx = mapX + (p.x / WORLD_SIZE) * mapSize;
-      const my = mapY + (p.y / WORLD_SIZE) * mapSize;
-      ctx.fillStyle = p.isHunter ? "#ff6b6b" : "#5fde5f";
-      ctx.beginPath();
-      ctx.arc(mx, my, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
+    // Tree dots
     for (const t of treesRef.current) {
-      const mx = mapX + (t.x / WORLD_SIZE) * mapSize;
-      const my = mapY + (t.y / WORLD_SIZE) * mapSize;
-      ctx.fillStyle = t.type === "bush" ? "#4ade80" : "#a78bfa";
+      const mx = CX + (t.x / WORLD_SIZE) * CS;
+      const my = CY + (t.y / WORLD_SIZE) * CS;
+      ctx.fillStyle = t.type === "bush" ? "rgba(60,180,40,0.6)" : "rgba(30,100,15,0.6)";
       ctx.fillRect(mx - 1, my - 1, 2, 2);
     }
+
+    // Rock dots
+    for (const r of rocksRef.current) {
+      const mx = CX + (r.x / WORLD_SIZE) * CS;
+      const my = CY + (r.y / WORLD_SIZE) * CS;
+      ctx.fillStyle = "rgba(100,90,80,0.4)";
+      ctx.fillRect(mx - 0.5, my - 0.5, 1.5, 1.5);
+    }
+
+    if (isHunterLocal) {
+      if (!radarRevealed) {
+        // ── Scanning phase: rotating sweep line ─────────────────────
+        const sweepAngle = ((nowMsMap % 3200) / 3200) * Math.PI * 2;
+        const ccx = CX + CS / 2;
+        const ccy = CY + CS / 2;
+        // Trailing glow arcs
+        for (let i = 8; i >= 0; i--) {
+          const a = sweepAngle - (i / 9) * (Math.PI * 0.55);
+          const alpha = ((9 - i) / 9) * 0.28;
+          ctx.strokeStyle = `rgba(80,140,255,${alpha})`;
+          ctx.lineWidth = CS * 0.7;
+          ctx.beginPath();
+          ctx.moveTo(ccx, ccy);
+          const ex = ccx + Math.cos(a) * CS;
+          const ey = ccy + Math.sin(a) * CS;
+          ctx.lineTo(ex, ey);
+          ctx.stroke();
+        }
+        // Sweep leading edge
+        ctx.strokeStyle = "rgba(130,200,255,0.7)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(ccx, ccy);
+        ctx.lineTo(
+          ccx + Math.cos(sweepAngle) * (CS / 2 + 4),
+          ccy + Math.sin(sweepAngle) * (CS / 2 + 4),
+        );
+        ctx.stroke();
+
+        // Countdown text
+        ctx.fillStyle = "rgba(130,185,255,0.85)";
+        ctx.font = "bold 18px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${secsTillChange}s`, ccx, ccy + 2);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      } else {
+        // ── Reveal phase: pulsing enemy dots ────────────────────────
+        const pulse = Math.sin(gameTickRef.current * 0.18) * 1.8;
+        for (const p of state.players) {
+          if (!p.isAlive || p.isHunter) continue;
+          const mx = CX + (p.x / WORLD_SIZE) * CS;
+          const my = CY + (p.y / WORLD_SIZE) * CS;
+          // Glow ring
+          ctx.fillStyle = "rgba(255,60,60,0.22)";
+          ctx.beginPath();
+          ctx.arc(mx, my, 5 + pulse, 0, Math.PI * 2);
+          ctx.fill();
+          // Solid dot
+          ctx.fillStyle = "#ff3333";
+          ctx.beginPath();
+          ctx.arc(mx, my, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          // Small crosshair
+          ctx.strokeStyle = "rgba(255,120,120,0.7)";
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(mx - 5, my); ctx.lineTo(mx + 5, my);
+          ctx.moveTo(mx, my - 5); ctx.lineTo(mx, my + 5);
+          ctx.stroke();
+        }
+        // Countdown
+        ctx.fillStyle = "rgba(255,160,80,0.75)";
+        ctx.font = "bold 11px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(`${secsTillChange}s`, CX + CS / 2, CY + CS - 3);
+        ctx.textAlign = "left";
+      }
+
+      // Hunter own dot (always visible, orange)
+      if (me && me.isAlive) {
+        const hx = CX + (localPosRef.current.x / WORLD_SIZE) * CS;
+        const hy = CY + (localPosRef.current.y / WORLD_SIZE) * CS;
+        ctx.fillStyle = "#ff9900";
+        ctx.beginPath();
+        ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        // Aim direction triangle
+        const ang = aimAngleRef.current;
+        ctx.fillStyle = "rgba(255,180,0,0.85)";
+        ctx.beginPath();
+        ctx.moveTo(hx + Math.cos(ang) * 7, hy + Math.sin(ang) * 7);
+        ctx.lineTo(hx + Math.cos(ang + 2.4) * 3.5, hy + Math.sin(ang + 2.4) * 3.5);
+        ctx.lineTo(hx + Math.cos(ang - 2.4) * 3.5, hy + Math.sin(ang - 2.4) * 3.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else {
+      // ── Animal view: only own location, no hunter or other animals ─
+      if (me && me.isAlive) {
+        const mx = CX + (localPosRef.current.x / WORLD_SIZE) * CS;
+        const my = CY + (localPosRef.current.y / WORLD_SIZE) * CS;
+        const pulse = (Math.sin(gameTickRef.current * 0.13) + 1) * 1.6;
+        // Glow
+        ctx.fillStyle = "rgba(100,255,80,0.2)";
+        ctx.beginPath();
+        ctx.arc(mx, my, 6 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+        // Dot
+        ctx.fillStyle = "#7fff00";
+        ctx.beginPath();
+        ctx.arc(mx, my, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore(); // remove clip
 
     for (let i = dustParticlesRef.current.length - 1; i >= 0; i--) {
       const p = dustParticlesRef.current[i];
@@ -998,11 +1158,55 @@ if (me && me.isAlive && me.isHunter) {
     }
 
     if (state.phase === "PLAYING") {
+      // ── Base dark vignette ──────────────────────────────────────────
       const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.7);
       vg.addColorStop(0, "rgba(0,0,0,0)");
-      vg.addColorStop(1, "rgba(0,0,0,0.35)");
+      vg.addColorStop(1, "rgba(0,0,0,0.32)");
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, w, h);
+
+      // ── Animal danger proximity warning ────────────────────────────
+      // Pulsing red edge when hunter is within DANGER_RADIUS world units
+      if (me && !me.isHunter && me.isAlive) {
+        const hunter = state.players.find((p) => p.isHunter && p.isAlive);
+        if (hunter) {
+          const distToHunter = Math.hypot(
+            hunter.x - localPosRef.current.x,
+            hunter.y - localPosRef.current.y,
+          );
+          const DANGER_RADIUS = 420;
+          if (distToHunter < DANGER_RADIUS) {
+            const rawIntensity = 1 - distToHunter / DANGER_RADIUS;
+            // Heartbeat pulse: two quick beats per second
+            const beatPhase = (gameTickRef.current % 60) / 60;
+            const beat = beatPhase < 0.12 ? beatPhase / 0.12
+              : beatPhase < 0.22 ? (0.22 - beatPhase) / 0.10
+              : beatPhase < 0.34 ? (beatPhase - 0.22) / 0.12
+              : beatPhase < 0.44 ? (0.44 - beatPhase) / 0.10
+              : 0;
+            const intensity = rawIntensity * (0.25 + beat * 0.45);
+            const dv = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.7);
+            dv.addColorStop(0, "rgba(255,0,0,0)");
+            dv.addColorStop(1, `rgba(200,0,0,${intensity.toFixed(3)})`);
+            ctx.fillStyle = dv;
+            ctx.fillRect(0, 0, w, h);
+          }
+        }
+      }
+
+      // ── Time-pressure vignette (<20 s remaining) ───────────────────
+      if (state.timeRemaining <= 20 && state.timeRemaining > 0) {
+        const urgency = (20 - state.timeRemaining) / 20; // 0→1 as time runs out
+        const timePulse = (Math.sin(gameTickRef.current * (0.1 + urgency * 0.25)) + 1) * 0.5;
+        const timeAlpha = urgency * 0.22 * timePulse;
+        if (timeAlpha > 0.01) {
+          const tv = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.4, w / 2, h / 2, Math.max(w, h) * 0.75);
+          tv.addColorStop(0, "rgba(0,0,0,0)");
+          tv.addColorStop(1, `rgba(180,60,0,${timeAlpha.toFixed(3)})`);
+          ctx.fillStyle = tv;
+          ctx.fillRect(0, 0, w, h);
+        }
+      }
     }
 
     gameTickRef.current++;

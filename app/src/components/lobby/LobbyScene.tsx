@@ -6,6 +6,8 @@ import MorphPanel from "./MorphPanel";
 import UpgradePanel from "./UpgradePanel";
 import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
+import PortraitLobby from "./PortraitLobby";
+import { useIsPortrait } from "../../hooks/useIsPortrait";
 import type { SerializedState, AnimalType, PerkType } from "../../types";
 
 const DURATION_PRESETS = [
@@ -44,6 +46,8 @@ export default function LobbyScene({
   onReady,
   onStart,
 }: LobbySceneProps) {
+  const isPortrait = useIsPortrait();
+
   const me = gameState?.players.find((p) => p.id === userId);
   const isReady = me?.isReady ?? false;
   const playerCount = gameState?.players.length ?? 0;
@@ -51,6 +55,25 @@ export default function LobbyScene({
   const canStart = allReady;
 
   const inGame = gameState?.phase === "PLAYING";
+
+  // Portrait mobile: use vertical tab layout instead of 3-column grid
+  if (isPortrait) {
+    return (
+      <PortraitLobby
+        username={username}
+        userId={userId}
+        gameState={gameState}
+        connected={connected}
+        selectedAnimal={selectedAnimal}
+        selectedPerk={selectedPerk}
+        onSelectAnimal={onSelectAnimal}
+        onSelectPerk={onSelectPerk}
+        onSetDuration={onSetDuration}
+        onReady={onReady}
+        onStart={onStart}
+      />
+    );
+  }
 
   return (
     <div className="relative w-dvw h-dvh overflow-hidden select-none" style={{ touchAction: "none" }}>
