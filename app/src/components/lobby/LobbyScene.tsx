@@ -135,19 +135,20 @@ export default function LobbyScene({
         </div>
       </div>
 
-      {/* Central tree — absolutely positioned, z-index between bg and panels */}
+      {/* Central tree — anchored to ground bottom, never floats into sky */}
+      {/* bottom:38% matches the ground-line in LobbyBackground canvas (~h*0.62 from top) */}
       <div
         className="absolute pointer-events-none"
         style={{
           left: "50%",
-          top: "8%",
+          bottom: "38%",
           transform: "translateX(-50%)",
-          width: "clamp(200px, 28vw, 360px)",
+          width: "clamp(160px, 26vw, 340px)",
           zIndex: 0,
           filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.4))",
         }}
       >
-        <SvgTree className="w-full h-full" />
+        <SvgTree className="w-full h-auto" />
       </div>
     </div>
   );

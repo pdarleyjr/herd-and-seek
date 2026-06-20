@@ -60,6 +60,34 @@ interface AmbientParticle {
   color: string;
 }
 
+interface RockEntity {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  rotation: number;
+  colorIdx: number; // 0=mid-grey, 1=dark-grey, 2=warm-grey
+}
+
+interface GrassPatch {
+  x: number;
+  y: number;
+  count: number;
+  spread: number;
+  tall: boolean;
+  seed: number;
+  withFlower: boolean;
+}
+
+// Deterministic PRNG — returns values in [0,1) given a stable seed
+function prng(seed: number) {
+  let s = (seed | 0) + 1;
+  return () => {
+    s = ((s * 1664525) + 1013904223) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
 interface GameCanvasProps {
   assets: AssetMap;
   userId: string;
@@ -78,11 +106,11 @@ function getAnimalImage(
 
 function generateTrees(): TreeEntity[] {
   const trees: TreeEntity[] = [];
-  const count = 35;
+  const count = 60;
   for (let i = 0; i < count; i++) {
     const r = Math.random();
     const type: TreeEntity["type"] =
-      r < 0.5 ? "green" : r < 0.8 ? "brown" : "bush";
+      r < 0.5 ? "green" : r < 0.78 ? "brown" : "bush";
     trees.push({
       x: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
       y: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
@@ -90,6 +118,39 @@ function generateTrees(): TreeEntity[] {
     });
   }
   return trees;
+}
+
+function generateRocks(): RockEntity[] {
+  const rocks: RockEntity[] = [];
+  const count = 30;
+  for (let i = 0; i < count; i++) {
+    const large = i < 9;
+    rocks.push({
+      x: Math.floor(Math.random() * (WORLD_SIZE - 240)) + 120,
+      y: Math.floor(Math.random() * (WORLD_SIZE - 240)) + 120,
+      rx: large ? 28 + Math.random() * 18 : 12 + Math.random() * 11,
+      ry: large ? 18 + Math.random() * 12 : 7 + Math.random() * 8,
+      rotation: Math.random() * Math.PI,
+      colorIdx: Math.floor(Math.random() * 3),
+    });
+  }
+  return rocks;
+}
+
+function generateGrassPatches(): GrassPatch[] {
+  const patches: GrassPatch[] = [];
+  for (let i = 0; i < 40; i++) {
+    patches.push({
+      x: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
+      y: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
+      count: 5 + Math.floor(Math.random() * 5),
+      spread: 16 + Math.floor(Math.random() * 20),
+      tall: Math.random() < 0.4,
+      seed: Math.floor(Math.random() * 9999) + 1,
+      withFlower: Math.random() < 0.28,
+    });
+  }
+  return patches;
 }
 
 function isTouchDevice(): boolean {
@@ -123,6 +184,8 @@ export default function GameCanvas({
   const cameraRef = useRef({ x: 0, y: 0 });
   const npcsRef = useRef<NpcEntity[]>([]);
   const treesRef = useRef<TreeEntity[]>([]);
+  const rocksRef = useRef<RockEntity[]>([]);
+  const grassPatchesRef = useRef<GrassPatch[]>([]);
   const decoysRef = useRef<DecoyEntity[]>([]);
   const serverStateRef = useRef<SerializedState | null>(null);
   const gameTickRef = useRef(0);
@@ -219,6 +282,8 @@ if (gameState.npcSeeds.length > 0 && npcsRef.current.length === 0) {
         }
       }
       treesRef.current = generateTrees();
+      rocksRef.current = generateRocks();
+      grassPatchesRef.current = generateGrassPatches();
       soundManager.gameStart();
     }
 
@@ -441,10 +506,8 @@ const updateLocalPlayer = useCallback(() => {
     const { w, h } = canvasSizeRef.current;
     ctx.clearRect(0, 0, w, h);
 
-    const grd = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) / 1.2);
-    grd.addColorStop(0, "#5a8c4a");
-    grd.addColorStop(1, "#2a5c1a");
-    ctx.fillStyle = grd;
+    // ── Rich terrain base ──────────────────────────────────────────────────
+    ctx.fillStyle = "#4a8a30";
     ctx.fillRect(0, 0, w, h);
 
     const state = serverStateRef.current;
@@ -476,8 +539,29 @@ const updateLocalPlayer = useCallback(() => {
     ctx.lineWidth = 12;
     ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
 
-    const gridSize = 100;
-    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    // ── Terrain variation patches (world-coord, deterministic) ─────────────
+    const PATCH_GRID = 160;
+    const patchStartX = Math.floor(camX / PATCH_GRID) * PATCH_GRID;
+    const patchStartY = Math.floor(camY / PATCH_GRID) * PATCH_GRID;
+    for (let px = patchStartX - PATCH_GRID; px < camX + w + PATCH_GRID; px += PATCH_GRID) {
+      for (let py = patchStartY - PATCH_GRID; py < camY + h + PATCH_GRID; py += PATCH_GRID) {
+        const s = Math.abs((px * 7919 + py * 6271) & 0x7fffffff);
+        if (s % 10 < 4) {
+          const sx = px - camX + (s % PATCH_GRID) * 0.22;
+          const sy = py - camY + ((s >> 8) % PATCH_GRID) * 0.22;
+          const prx = 50 + (s & 55);
+          const pry = 32 + ((s >> 4) & 40);
+          ctx.fillStyle = s % 3 === 0 ? "rgba(22,80,8,0.11)" : "rgba(62,120,18,0.09)";
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, prx, pry, (s & 3) * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // ── Grid ───────────────────────────────────────────────────────────────
+    const gridSize = 120;
+    ctx.strokeStyle = "rgba(0,0,0,0.055)";
     ctx.lineWidth = 1;
     const startX = Math.floor(camX / gridSize) * gridSize;
     const startY = Math.floor(camY / gridSize) * gridSize;
@@ -494,6 +578,39 @@ const updateLocalPlayer = useCallback(() => {
       ctx.stroke();
     }
 
+    // ── Grass patches (drawn before sprites — always behind entities) ───────
+    for (const patch of grassPatchesRef.current) {
+      const bx = patch.x - camX;
+      const by = patch.y - camY;
+      if (bx < -60 || bx > w + 60 || by < -60 || by > h + 60) continue;
+      const rng = prng(patch.seed);
+      const bladeH = patch.tall ? 20 : 12;
+      for (let i = 0; i < patch.count; i++) {
+        const ox = (rng() - 0.5) * patch.spread * 2;
+        const oy = (rng() - 0.5) * patch.spread * 0.55;
+        const bh = bladeH + rng() * 8;
+        const sw = (rng() - 0.5) * 7;
+        ctx.strokeStyle = i % 2 === 0 ? "#287810" : "#3a9818";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx + ox, by + oy);
+        ctx.quadraticCurveTo(bx + ox + sw, by + oy - bh * 0.55, bx + ox + sw * 1.4, by + oy - bh);
+        ctx.stroke();
+      }
+      if (patch.withFlower) {
+        const fx = bx;
+        const fy = by - bladeH - 3;
+        ctx.fillStyle = "#fffde0";
+        ctx.beginPath();
+        ctx.arc(fx, fy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#f5c030";
+        ctx.beginPath();
+        ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     for (const p of ambientParticlesRef.current) {
       const alpha = (p.life / p.maxLife) * 0.4;
       const sx = p.x - camX;
@@ -507,8 +624,8 @@ const updateLocalPlayer = useCallback(() => {
     interface RenderItem {
       x: number;
       y: number;
-      img: HTMLImageElement;
-      
+      img?: HTMLImageElement;
+      drawFn?: (sx: number, sy: number) => void;
       rotation: number;
       size: number;
       isEntity: boolean;
@@ -605,11 +722,44 @@ const img =
         y: t.y,
         img,
         rotation: 0,
-        size: t.type === "bush" ? 48 : 80,
+        size: t.type === "bush" ? 52 : 88,
         isEntity: false,
         shadow: t.type !== "bush",
         alpha: 1,
         glow: null,
+      });
+    }
+
+    // Rocks — added as drawFn items so they sort correctly with sprites
+    const rockColors = ["#8a8878", "#787868", "#9a9a88"];
+    for (const rock of rocksRef.current) {
+      const { x, y, rx, ry, rotation, colorIdx } = rock;
+      renderArray.push({
+        x,
+        y,
+        rotation: 0,
+        size: rx,
+        isEntity: false,
+        shadow: false,
+        alpha: 1,
+        glow: null,
+        drawFn: (sx: number, sy: number) => {
+          // Rock shadow
+          ctx.fillStyle = "rgba(0,0,0,0.22)";
+          ctx.beginPath();
+          ctx.ellipse(sx + rx * 0.28, sy + ry * 0.55, rx * 0.82, ry * 0.42, rotation, 0, Math.PI * 2);
+          ctx.fill();
+          // Rock body
+          ctx.fillStyle = rockColors[colorIdx];
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, rx, ry, rotation, 0, Math.PI * 2);
+          ctx.fill();
+          // Highlight
+          ctx.fillStyle = "rgba(255,255,255,0.2)";
+          ctx.beginPath();
+          ctx.ellipse(sx - rx * 0.22, sy - ry * 0.22, rx * 0.38, ry * 0.28, rotation - 0.4, 0, Math.PI * 2);
+          ctx.fill();
+        },
       });
     }
 
@@ -638,14 +788,17 @@ for (const item of renderArray) {
         ctx.fill();
       }
 
-      ctx.save();
-      ctx.globalAlpha = item.alpha;
-      ctx.translate(screenX, screenY);
-      if (item.rotation !== 0) {
-        ctx.rotate(item.rotation);
+      if (item.drawFn) {
+        // Procedural draw (rocks etc.) — already handles its own shadow
+        item.drawFn(screenX, screenY);
+      } else if (item.img) {
+        ctx.save();
+        ctx.globalAlpha = item.alpha;
+        ctx.translate(screenX, screenY);
+        if (item.rotation !== 0) ctx.rotate(item.rotation);
+        ctx.drawImage(item.img, -item.size / 2, -item.size / 2, item.size, item.size);
+        ctx.restore();
       }
-      ctx.drawImage(item.img, -item.size / 2, -item.size / 2, item.size, item.size);
-      ctx.restore();
     }
 
     // Draw username tags above animals (only visible to non-hunters)
@@ -946,14 +1099,18 @@ decoysRef.current.push({
     if (!canvas) return;
 
     const resize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      // Use visualViewport when available (handles iOS address bar correctly)
+      const vv = window.visualViewport;
+      const w = vv ? Math.floor(vv.width) : window.innerWidth;
+      const h = vv ? Math.floor(vv.height) : window.innerHeight;
       canvas.width = w;
       canvas.height = h;
       canvasSizeRef.current = { w, h };
     };
     resize();
     window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
+    window.visualViewport?.addEventListener("resize", resize);
 
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
@@ -1111,6 +1268,8 @@ decoysRef.current.push({
 
     return () => {
       window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       canvas.removeEventListener("mousemove", onMouseMove);

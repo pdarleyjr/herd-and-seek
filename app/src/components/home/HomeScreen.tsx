@@ -55,8 +55,8 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
 
       {/* ── UI content: title + name entry ── */}
       <main
-        className="relative z-20 flex min-h-dvh flex-col items-center justify-start px-4 pt-[8vh] pb-[22vh]"
-        style={{ gap: "clamp(16px, 3vh, 32px)" }}
+        className="relative z-20 flex min-h-dvh flex-col items-center justify-start px-4 pt-[8dvh] pb-[20dvh]"
+        style={{ gap: "clamp(14px, 3dvh, 32px)" }}
       >
         {/* Game title */}
         <HerdSeekTitle />
