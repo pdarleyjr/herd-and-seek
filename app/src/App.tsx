@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { loadAssets, type AssetMap } from "./AssetLoader";
 import GameCanvas from "./GameCanvas";
 import LobbyScene from "./components/lobby/LobbyScene";
+import HomeScreen from "./components/home/HomeScreen";
 import { useGameSocket } from "./useGameSocket";
 import {
   type SerializedState,
@@ -142,35 +143,11 @@ export default function App() {
 
   if (screen === "AUTH") {
     return (
-      <div className="flex flex-col items-center justify-center h-dvh bg-gradient-to-b from-green-800 to-green-950 text-white gap-6 sm:gap-8 px-4">
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-center">
-          🦁 Herd &amp; Seek
-        </h1>
-        <p className="text-base sm:text-lg md:text-xl text-green-200 max-w-md text-center">
-          An asymmetric stealth game. Blend in with the herd, or hunt them down.
-        </p>
-        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs sm:max-w-md">
-          <input
-            type="text"
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAuth()}
-            placeholder="Enter your username"
-            className="flex-1 px-4 py-4 sm:py-3 rounded-lg bg-white/10 border border-white/30 text-white text-lg sm:text-base placeholder-white/50 focus:outline-none focus:border-white min-h-[56px]"
-            maxLength={20}
-            autoComplete="off"
-          />
-          <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              handleAuth();
-            }}
-            className="px-8 py-4 sm:py-3 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-lg sm:text-base transition min-h-[56px] touch-manipulation select-none"
-          >
-            Play
-          </button>
-        </div>
-      </div>
+      <HomeScreen
+        nameInput={nameInput}
+        onNameChange={setNameInput}
+        onSubmit={handleAuth}
+      />
     );
   }
 
