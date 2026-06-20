@@ -35,6 +35,7 @@ export interface SerializedState {
   ammo: number;
   maxAmmo: number;
   timeRemaining: number;
+  matchDuration: number;
   winner: "hunter" | "animals" | null;
   eventLog: string[];
 }
@@ -45,7 +46,7 @@ export interface ServerMessage {
 }
 
 export interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION";
   payload?: any;
 }
 

@@ -34,13 +34,14 @@ interface RoomState {
   ammo: number;
   maxAmmo: number;
   timeRemaining: number;
+  matchDuration: number;
   matchStartTime: number;
   winner: "hunter" | "animals" | null;
   eventLog: string[];
 }
 
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION";
   payload?: any;
 }
 
@@ -51,7 +52,9 @@ interface ServerMessage {
 
 const WORLD_SIZE = 2000;
 const PLAYER_COLLISION_RADIUS = 34;
-const MATCH_DURATION = 120;
+const MATCH_DURATION_DEFAULT = 120;
+const MATCH_DURATION_MIN = 30;
+const MATCH_DURATION_MAX = 3600;
 
 const ALL_ANIMALS: AnimalType[] = [
   "elephant", "penguin", "monkey", "giraffe",
@@ -100,7 +103,8 @@ export class GameRoomDurableObject implements DurableObject {
       hunterId: null,
       ammo: 0,
       maxAmmo: 0,
-      timeRemaining: MATCH_DURATION,
+      timeRemaining: MATCH_DURATION_DEFAULT,
+      matchDuration: MATCH_DURATION_DEFAULT,
       matchStartTime: 0,
       winner: null,
       eventLog: [],
@@ -197,6 +201,18 @@ export class GameRoomDurableObject implements DurableObject {
           });
         }
         break;
+
+      case "SET_DURATION":
+        if (this.state.phase === "LOBBY") {
+          const raw = parsed.payload?.duration;
+          if (typeof raw === "number") {
+            const clamped = Math.max(MATCH_DURATION_MIN, Math.min(MATCH_DURATION_MAX, Math.round(raw)));
+            this.state.matchDuration = clamped;
+            this.state.timeRemaining = clamped;
+            this.broadcastState();
+          }
+        }
+        break;
     }
   }
 
@@ -279,7 +295,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.maxAmmo = animalCount * 10;
     this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(players.length));
     this.state.phase = "PLAYING";
-    this.state.timeRemaining = MATCH_DURATION;
+    this.state.timeRemaining = this.state.matchDuration;
     this.state.matchStartTime = Date.now();
     this.state.winner = null;
     this.state.eventLog = [`Match started! ${animalCount} animal(s) hiding.`];
@@ -387,12 +403,12 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.countdownInterval = setInterval(() => {
       if (this.state.phase !== "PLAYING") return;
       const elapsed = (Date.now() - this.state.matchStartTime) / 1000;
-      if (elapsed >= MATCH_DURATION) {
+      if (elapsed >= this.state.matchDuration) {
         this.state.timeRemaining = 0;
         this.endGame("animals", "Time expired! Animals survived!");
         return;
       }
-      this.state.timeRemaining = MATCH_DURATION - Math.floor(elapsed);
+      this.state.timeRemaining = this.state.matchDuration - Math.floor(elapsed);
     }, 250);
   }
 
@@ -413,7 +429,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.state.hunterId = null;
     this.state.ammo = 0;
     this.state.maxAmmo = 0;
-    this.state.timeRemaining = MATCH_DURATION;
+    this.state.timeRemaining = this.state.matchDuration; // preserve chosen duration
     this.state.winner = null;
     this.state.npcSeeds = [];
     this.state.eventLog = [];
@@ -446,6 +462,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
       ammo: this.state.ammo,
       maxAmmo: this.state.maxAmmo,
       timeRemaining: this.state.timeRemaining,
+      matchDuration: this.state.matchDuration,
       winner: this.state.winner,
       eventLog: this.state.eventLog,
     };

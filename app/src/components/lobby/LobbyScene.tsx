@@ -1,3 +1,4 @@
+import { useState } from "react";
 import LobbyBackground from "./LobbyBackground";
 import SvgTree from "./SvgTree";
 import HerdSeekLogo from "./HerdSeekLogo";
@@ -6,6 +7,15 @@ import UpgradePanel from "./UpgradePanel";
 import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
 import type { SerializedState, AnimalType, PerkType } from "../../types";
+
+const DURATION_PRESETS = [
+  { label: "30s", seconds: 30 },
+  { label: "1m", seconds: 60 },
+  { label: "2m", seconds: 120 },
+  { label: "3m", seconds: 180 },
+  { label: "5m", seconds: 300 },
+  { label: "10m", seconds: 600 },
+];
 
 interface LobbySceneProps {
   username: string;
@@ -16,6 +26,7 @@ interface LobbySceneProps {
   selectedPerk: PerkType;
   onSelectAnimal: (a: AnimalType) => void;
   onSelectPerk: (p: PerkType) => void;
+  onSetDuration: (seconds: number) => void;
   onReady: () => void;
   onStart: () => void;
 }
@@ -29,6 +40,7 @@ export default function LobbyScene({
   selectedPerk,
   onSelectAnimal,
   onSelectPerk,
+  onSetDuration,
   onReady,
   onStart,
 }: LobbySceneProps) {
@@ -113,9 +125,13 @@ export default function LobbyScene({
           />
         </div>
 
-        {/* BOTTOM-RIGHT: Game mode info */}
+        {/* BOTTOM-RIGHT: Game mode info + duration picker */}
         <div className="pointer-events-auto flex items-end justify-end">
-          <GameModeInfo />
+          <GameModeInfo
+            matchDuration={gameState?.matchDuration ?? 120}
+            onSetDuration={onSetDuration}
+            disabled={inGame}
+          />
         </div>
       </div>
 
@@ -177,12 +193,56 @@ function PlayerList({
   );
 }
 
-function GameModeInfo() {
+function GameModeInfo({
+  matchDuration,
+  onSetDuration,
+  disabled,
+}: {
+  matchDuration: number;
+  onSetDuration: (s: number) => void;
+  disabled: boolean;
+}) {
+  const [customMode, setCustomMode] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return sec === 0 ? `${m}:00` : `${m}:${String(sec).padStart(2, "0")}`;
+  };
+
+  const isPreset = DURATION_PRESETS.some((p) => p.seconds === matchDuration);
+
+  const applyCustom = () => {
+    // Accept "1:30", "90", "1m30s", "2m" etc.
+    const raw = customInput.trim().toLowerCase();
+    let total = 0;
+    const mMatch = raw.match(/(\d+)\s*m(?:in)?/);
+    const sMatch = raw.match(/(\d+)\s*s(?:ec)?/);
+    const colonMatch = raw.match(/^(\d+):(\d+)$/);
+    const plainMatch = raw.match(/^(\d+)$/);
+    if (colonMatch) {
+      total = parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
+    } else if (mMatch || sMatch) {
+      total = (mMatch ? parseInt(mMatch[1]) * 60 : 0) + (sMatch ? parseInt(sMatch[1]) : 0);
+    } else if (plainMatch) {
+      // bare number: if <= 60 treat as minutes, else as seconds
+      const n = parseInt(plainMatch[1]);
+      total = n <= 60 ? n * 60 : n;
+    }
+    if (total >= 30 && total <= 3600) {
+      onSetDuration(total);
+      setCustomMode(false);
+      setCustomInput("");
+    }
+  };
+
   return (
     <div
-      className="rounded-2xl border-2 border-[#8b5c1e] px-4 py-2 text-right"
+      className="rounded-2xl border-2 border-[#8b5c1e] px-3 py-2.5 text-right w-full"
       style={{ background: "linear-gradient(135deg, #3d2210cc 0%, #1a0f05cc 100%)" }}
     >
+      {/* Mode & Map rows */}
       <div className="flex items-center gap-2 justify-end">
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Mode</span>
         <span className="text-[#f5d07a] text-xs font-bold">Stealth Hunt</span>
@@ -191,9 +251,88 @@ function GameModeInfo() {
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Map</span>
         <span className="text-[#f5d07a] text-xs font-bold">Savanna</span>
       </div>
-      <div className="flex items-center gap-2 justify-end mt-0.5">
-        <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Time</span>
-        <span className="text-[#f5d07a] text-xs font-bold">2:00</span>
+
+      {/* Time row — interactive */}
+      <div className="mt-2 border-t border-[#6b3a0a] pt-2">
+        <div className="flex items-center justify-end gap-2 mb-1.5">
+          <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Match Time</span>
+          <span
+            className="text-[#f5d07a] text-sm font-extrabold tabular-nums"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {fmt(matchDuration)}
+          </span>
+        </div>
+
+        {!disabled && (
+          <>
+            {/* Preset chips */}
+            <div className="flex flex-wrap gap-1 justify-end mb-1.5">
+              {DURATION_PRESETS.map((p) => {
+                const active = p.seconds === matchDuration;
+                return (
+                  <button
+                    key={p.seconds}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      onSetDuration(p.seconds);
+                      setCustomMode(false);
+                    }}
+                    className={[
+                      "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none",
+                      active
+                        ? "border-[#7fff00] bg-[#1a3a08] text-[#7fff00] shadow-[0_0_6px_rgba(127,255,0,0.35)]"
+                        : "border-[#6b3a0a] bg-[#2a1808]/80 text-[#e8c87a] hover:border-[#a07030] hover:text-[#f5d07a] active:scale-95",
+                    ].join(" ")}
+                    style={{ touchAction: "manipulation" }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+              {/* Custom button */}
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  setCustomMode((v) => !v);
+                }}
+                className={[
+                  "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none",
+                  !isPreset || customMode
+                    ? "border-[#7fff00] bg-[#1a3a08] text-[#7fff00]"
+                    : "border-[#6b3a0a] bg-[#2a1808]/80 text-[#e8c87a] hover:border-[#a07030]",
+                ].join(" ")}
+                style={{ touchAction: "manipulation" }}
+              >
+                Custom
+              </button>
+            </div>
+
+            {/* Custom input row */}
+            {customMode && (
+              <div className="flex gap-1 justify-end items-center">
+                <input
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && applyCustom()}
+                  placeholder="e.g. 4m, 2:30, 90"
+                  className="w-28 px-2 py-1 rounded-lg bg-[#1a0f05] border border-[#8b5c1e] text-[#f5d07a] text-xs placeholder-[#6b4a2a] focus:outline-none focus:border-[#7fff00]"
+                  autoFocus
+                  style={{ touchAction: "manipulation" }}
+                />
+                <button
+                  onPointerDown={(e) => { e.preventDefault(); applyCustom(); }}
+                  className="px-2 py-1 rounded-lg bg-[#7fff00] text-black text-xs font-bold active:scale-95 select-none"
+                  style={{ touchAction: "manipulation" }}
+                >
+                  Set
+                </button>
+              </div>
+            )}
+            <p className="text-[#6b4a2a] text-[10px] mt-1 text-right">30s – 60m allowed</p>
+          </>
+        )}
       </div>
     </div>
   );

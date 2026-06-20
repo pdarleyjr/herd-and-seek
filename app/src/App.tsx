@@ -194,6 +194,9 @@ export default function App() {
           setSelectedPerk(p);
           send({ type: "SELECT_PERK", payload: { perk: p } });
         }}
+        onSetDuration={(seconds) => {
+          send({ type: "SET_DURATION", payload: { duration: seconds } });
+        }}
         onReady={() => {
           send({ type: "READY", payload: { isReady: !isReady } });
         }}
