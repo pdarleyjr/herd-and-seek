@@ -3,7 +3,7 @@ export type AnimalType =
   | "bear" | "dog" | "frog" | "horse"
   | "pig" | "rabbit" | "cow" | "duck"
   | "panda" | "parrot" | "owl" | "snake";
-export type PerkType = "sprint" | "camouflage" | "none";
+export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
 export interface PlayerState {
@@ -16,6 +16,7 @@ export interface PlayerState {
   isReady: boolean;
   isAlive: boolean;
   perk: PerkType;
+  extraLifeUsed: boolean;
 }
 
 export interface NpcSeed {
@@ -39,17 +40,17 @@ interface RoomState {
 }
 
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY";
   payload?: any;
 }
 
 interface ServerMessage {
-  type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER";
+  type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER" | "DECOY_SPAWN";
   payload: any;
 }
 
 const WORLD_SIZE = 2000;
-const PLAYER_RADIUS = 32;
+const PLAYER_COLLISION_RADIUS = 34;
 const MATCH_DURATION = 120;
 
 const ALL_ANIMALS: AnimalType[] = [
@@ -61,6 +62,11 @@ const ALL_ANIMALS: AnimalType[] = [
 
 function randomAnimal(): AnimalType {
   return ALL_ANIMALS[Math.floor(Math.random() * ALL_ANIMALS.length)];
+}
+
+function randomAnimalExcept(current: AnimalType): AnimalType {
+  const available = ALL_ANIMALS.filter(a => a !== current);
+  return available[Math.floor(Math.random() * available.length)];
 }
 
 function generateNpcSeeds(count: number): NpcSeed[] {
@@ -182,6 +188,15 @@ export class GameRoomDurableObject implements DurableObject {
           this.broadcastState();
         }
         break;
+
+      case "DECOY":
+        if (this.state.phase === "PLAYING" && player.isAlive && !player.isHunter && player.perk === "decoy") {
+          this.broadcast({
+            type: "DECOY_SPAWN",
+            payload: { x: player.x, y: player.y, animalType: player.animalType, ownerId: userId },
+          });
+        }
+        break;
     }
   }
 
@@ -217,6 +232,7 @@ export class GameRoomDurableObject implements DurableObject {
         isReady: false,
         isAlive: true,
         perk: "none",
+        extraLifeUsed: false,
       });
     } else {
       existing.isAlive = true;
@@ -252,6 +268,7 @@ export class GameRoomDurableObject implements DurableObject {
       p.isHunter = i === hunterIndex;
       p.isAlive = true;
       p.isReady = false;
+      p.extraLifeUsed = false;
       p.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
       p.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
     });
@@ -285,13 +302,28 @@ export class GameRoomDurableObject implements DurableObject {
       const dx = targetX - p.x;
       const dy = targetY - p.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= PLAYER_RADIUS) {
+      if (dist <= PLAYER_COLLISION_RADIUS) {
         hitPlayer = p;
         break;
       }
     }
 
     if (hitPlayer) {
+      if (hitPlayer.perk === "extraLife") {
+        const previousAnimal = hitPlayer.animalType;
+        hitPlayer.animalType = randomAnimalExcept(previousAnimal);
+        hitPlayer.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+        hitPlayer.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+        hitPlayer.perk = "none";
+        hitPlayer.extraLifeUsed = true;
+        this.state.eventLog.unshift(`${hitPlayer.username}'s Extra Life activated! Respawned as ${hitPlayer.animalType}.`);
+        this.state.eventLog = this.state.eventLog.slice(0, 8);
+this.broadcast({
+           type: "HIT",
+           payload: { targetId: hitPlayer.id, targetX, targetY, hit: true, extraLife: true, animalType: hitPlayer.animalType, x: hitPlayer.x, y: hitPlayer.y },
+         });
+        return;
+      }
       hitPlayer.isAlive = false;
       this.state.eventLog.unshift(`${hitPlayer.username} was neutralized!`);
       this.state.eventLog = this.state.eventLog.slice(0, 8);
@@ -323,7 +355,7 @@ export class GameRoomDurableObject implements DurableObject {
     }
   }
 
-  endGame(winner: "hunter" | "animals", reason: string) {
+endGame(winner: "hunter" | "animals", reason: string) {
     if (this.state.phase === "ENDED") return;
     this.state.phase = "ENDED";
     this.state.winner = winner;
@@ -335,6 +367,10 @@ export class GameRoomDurableObject implements DurableObject {
       type: "GAME_OVER",
       payload: { winner, reason, state: this.serializeState() },
     });
+    setTimeout(() => {
+      this.resetRoom();
+      this.broadcastState();
+    }, 5000);
   }
 
   startSyncLoop() {
@@ -386,6 +422,7 @@ export class GameRoomDurableObject implements DurableObject {
       p.isReady = false;
       p.isAlive = true;
       p.perk = "none";
+      p.extraLifeUsed = false;
     });
   }
 
@@ -402,6 +439,7 @@ export class GameRoomDurableObject implements DurableObject {
         isReady: p.isReady,
         isAlive: p.isAlive,
         perk: p.perk,
+        extraLifeUsed: p.extraLifeUsed,
       })),
       npcSeeds: this.state.npcSeeds,
       hunterId: this.state.hunterId,
@@ -441,3 +479,8 @@ export default {
     return stub.fetch(request);
   },
 };
+
+
+
+
+

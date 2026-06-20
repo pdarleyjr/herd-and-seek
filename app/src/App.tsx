@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { loadAssets, type AssetMap } from "./AssetLoader";
 import GameCanvas from "./GameCanvas";
+import LobbyScene from "./components/lobby/LobbyScene";
 import { useGameSocket } from "./useGameSocket";
 import {
   type SerializedState,
   type AnimalType,
   type PerkType,
-  ANIMAL_OPTIONS,
-  PERK_OPTIONS,
 } from "./types";
 import { soundManager } from "./SoundManager";
 
@@ -23,6 +22,7 @@ export default function App() {
   const [eventLog, setEventLog] = useState<string[]>([]);
   const [selectedAnimal, setSelectedAnimal] = useState<AnimalType>("elephant");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
+  const [endCountdown, setEndCountdown] = useState<number | null>(null);
   const localPosRef = useRef({ x: 100, y: 100 });
 
   useEffect(() => {
@@ -37,6 +37,7 @@ export default function App() {
   }, []);
 
   const handleAuth = useCallback(() => {
+    soundManager.unlock();
     const name = nameInput.trim();
     if (!name) return;
     const id = sessionStorage.getItem("hs_sessionId") || crypto.randomUUID();
@@ -62,20 +63,29 @@ export default function App() {
           setScreen("GAME");
         }
       } else if (data.type === "HIT") {
-        const { hit } = data.payload;
+        const { hit, extraLife, animalType: newAnimalType, targetId, x, y } = data.payload;
         if (hit) {
           soundManager.hit();
           onEvent("Player neutralized!");
+        } else if (extraLife) {
+          soundManager.perk();
+          onEvent(`Extra Life! Respawned as ${newAnimalType}.`);
+          if (targetId === userId && gameState) {
+            localPosRef.current = { x: x ?? localPosRef.current.x, y: y ?? localPosRef.current.y };
+          }
         } else {
           soundManager.miss();
           onEvent("Hunter missed!");
         }
       } else if (data.type === "GAME_OVER") {
-        const { winner, reason } = data.payload;
+        const { winner, reason, state } = data.payload;
+        if (state) setGameState(state);
         soundManager.gameEnd();
         onEvent(
           `Game Over: ${reason} — ${winner === "hunter" ? "Hunter" : "Animals"} win!`
         );
+        // Ensure all players (including eliminated) see the end screen
+        setScreen("GAME");
       }
     },
     [userId, onEvent]
@@ -83,15 +93,48 @@ export default function App() {
 
   const { send, connected } = useGameSocket(userId, username, handleSocketMessage);
 
+  const returnToLobby = useCallback(() => {
+    send({ type: "RESTART" });
+    setGameState(null);
+    setScreen("LOBBY");
+    setEndCountdown(null);
+  }, [send]);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
   };
 
+  useEffect(() => {
+    if (screen !== "GAME" || gameState?.phase !== "ENDED") {
+      setEndCountdown(null);
+      return;
+    }
+    setEndCountdown(5);
+    const interval = window.setInterval(() => {
+      setEndCountdown((prev) => (prev === null ? null : Math.max(0, prev - 1)));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [gameState?.phase, screen]);
+
+  useEffect(() => {
+    if (endCountdown !== 0) return;
+    returnToLobby();
+  }, [endCountdown, returnToLobby]);
+
+  // Handle server-initiated return to lobby (server resets room after 5s countdown)
+  useEffect(() => {
+    if (gameState?.phase === "LOBBY" && screen === "GAME") {
+      setGameState(null);
+      setScreen("LOBBY");
+      setEndCountdown(null);
+    }
+  }, [gameState?.phase, screen]);
+
   if (!assets) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white text-xl sm:text-2xl">
+      <div className="flex items-center justify-center h-dvh bg-gray-900 text-white text-xl sm:text-2xl">
         Loading assets...
       </div>
     );
@@ -99,7 +142,7 @@ export default function App() {
 
   if (screen === "AUTH") {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-6 sm:gap-8 px-4">
+      <div className="flex flex-col items-center justify-center h-dvh bg-gradient-to-b from-green-800 to-green-950 text-white gap-6 sm:gap-8 px-4">
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-center">
           🦁 Herd &amp; Seek
         </h1>
@@ -134,113 +177,30 @@ export default function App() {
   if (screen === "LOBBY" && (!gameState || gameState.phase === "LOBBY")) {
     const me = gameState?.players.find((p) => p.id === userId);
     const isReady = me?.isReady ?? false;
-    const playerCount = gameState?.players.length ?? 0;
-    const allReady = gameState?.players.every((p) => p.isReady) ?? false;
-    const canStart = playerCount >= 2 && allReady;
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-green-800 to-green-950 text-white gap-4 sm:gap-6 overflow-auto py-6 px-4">
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center">
-          🦁 Herd &amp; Seek
-        </h1>
-        <p className={`text-sm sm:text-base ${connected ? "text-green-400" : "text-red-400"}`}>
-          {connected ? "● Connected" : "○ Connecting..."}
-        </p>
-
-        <div className="bg-black/30 rounded-xl p-4 sm:p-6 w-full max-w-md">
-          <h2 className="text-lg sm:text-xl font-semibold mb-3">
-            Players ({playerCount})
-          </h2>
-          <div className="space-y-2">
-            {gameState?.players.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between bg-white/10 rounded-lg px-3 py-3 sm:py-2"
-              >
-                <span className="font-medium text-sm sm:text-base">
-                  🐾 {p.username}
-                </span>
-                <span
-                  className={`text-sm ${p.isReady ? "text-green-400" : "text-gray-400"}`}
-                >
-                  {p.isReady ? "✓ Ready" : "..."}
-                </span>
-              </div>
-            ))}
-            {playerCount === 0 && (
-              <p className="text-gray-400 text-sm">Waiting for connection...</p>
-            )}
-          </div>
-          {playerCount < 2 && playerCount > 0 && (
-            <p className="text-yellow-300 text-sm mt-3">
-              Waiting for at least 2 players...
-            </p>
-          )}
-        </div>
-
-        <div className="bg-black/30 rounded-xl p-4 sm:p-6 w-full max-w-md space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Select Animal</label>
-            <select
-              value={selectedAnimal}
-              onChange={(e) => {
-                const val = e.target.value as AnimalType;
-                setSelectedAnimal(val);
-                send({ type: "SELECT_ANIMAL", payload: { animalType: val } });
-              }}
-              className="w-full px-3 py-3 sm:py-2 rounded-lg bg-white/10 border border-white/30 text-white text-base min-h-[48px]"
-            >
-              {ANIMAL_OPTIONS.map((a) => (
-                <option key={a.value} value={a.value} className="bg-gray-800">
-                  {a.emoji} {a.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Select Perk</label>
-            <select
-              value={selectedPerk}
-              onChange={(e) => {
-                const val = e.target.value as PerkType;
-                setSelectedPerk(val);
-                send({ type: "SELECT_PERK", payload: { perk: val } });
-              }}
-              className="w-full px-3 py-3 sm:py-2 rounded-lg bg-white/10 border border-white/30 text-white text-base min-h-[48px]"
-            >
-              {PERK_OPTIONS.map((p) => (
-                <option key={p.value} value={p.value} className="bg-gray-800">
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-green-200 mt-1">
-              {PERK_OPTIONS.find((p) => p.value === selectedPerk)?.description}
-            </p>
-          </div>
-
-          <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              send({ type: "READY", payload: { isReady: !isReady } });
-            }}
-            className={`w-full py-4 sm:py-3 rounded-lg font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation select-none ${
-              isReady
-                ? "bg-green-500 hover:bg-green-400 active:bg-green-600 text-black"
-                : "bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black"
-            }`}
-          >
-            {isReady ? "✓ Ready — Tap to Unready" : "Ready Up"}
-          </button>
-
-          {canStart && (
-            <p className="text-center text-green-300 animate-pulse text-sm sm:text-base">
-              Match starting...
-            </p>
-          )}
-        </div>
-      </div>
+      <LobbyScene
+        username={username}
+        userId={userId}
+        gameState={gameState}
+        connected={connected}
+        selectedAnimal={selectedAnimal}
+        selectedPerk={selectedPerk}
+        onSelectAnimal={(a) => {
+          setSelectedAnimal(a);
+          send({ type: "SELECT_ANIMAL", payload: { animalType: a } });
+        }}
+        onSelectPerk={(p) => {
+          setSelectedPerk(p);
+          send({ type: "SELECT_PERK", payload: { perk: p } });
+        }}
+        onReady={() => {
+          send({ type: "READY", payload: { isReady: !isReady } });
+        }}
+        onStart={() => {
+          // Match starts automatically when all ready — no explicit start needed
+        }}
+      />
     );
   }
 
@@ -249,16 +209,17 @@ export default function App() {
 
   return (
     <div
-      className="relative w-screen h-screen overflow-hidden bg-green-900"
+      className="relative w-dvw h-dvh overflow-hidden bg-green-900"
       style={{ touchAction: "none" }}
     >
-      <GameCanvas
-        assets={assets}
-        userId={userId}
-        gameState={gameState}
-        localPosRef={localPosRef}
-        send={send}
-      />
+<GameCanvas
+         assets={assets}
+         userId={userId}
+         username={username}
+         gameState={gameState}
+         localPosRef={localPosRef}
+         send={send}
+       />
 
       {gameState?.phase === "PLAYING" && (
         <>
@@ -267,48 +228,48 @@ export default function App() {
             ⏱ {formatTime(gameState.timeRemaining)}
           </div>
 
-          {/* Event Log - bottom left, smaller on mobile, collapsible */}
-          <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[160px] sm:max-w-xs space-y-1">
-            <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
-            {eventLog.length === 0 && (
-              <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
-            )}
-            {eventLog.slice(0, 4).map((e, i) => (
-              <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
-            ))}
-          </div>
+{/* Event Log - bottom left, smaller on mobile */}
+           <div className="absolute bottom-44 sm:bottom-4 left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1">
+             <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
+             {eventLog.length === 0 && (
+               <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
+             )}
+             {eventLog.slice(0, 3).map((e, i) => (
+               <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
+             ))}
+           </div>
 
-          {/* Hunter Ammo - bottom right, responsive */}
-          {isHunter && (
-            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
-              <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
-              <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
-                {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
-                  >
-                    🔫
-                  </span>
-                ))}
+           {/* Hunter Ammo - bottom right, responsive, positioned above fire button */}
+           {isHunter && (
+             <div className="absolute bottom-44 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
+               <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
+               <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
+                 {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
+                   <span
+                     key={i}
+                     className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
+                   >
+                     🔫
+                   </span>
+                 ))}
+               </div>
+               <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
+                 {gameState.ammo}/{gameState.maxAmmo}
+               </p>
+             </div>
+           )}
+
+{/* Animal role indicator - bottom right, positioned below perk button on mobile */}
+            {!isHunter && me?.isAlive && (
+              <div className="absolute bottom-24 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm">
+                <p>
+                  Role: <span className="text-green-400">Animal</span>
+                </p>
+                <p className="text-[10px] sm:text-xs text-gray-300">
+                  Survive! Move to blend in.
+                </p>
               </div>
-              <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
-                {gameState.ammo}/{gameState.maxAmmo}
-              </p>
-            </div>
-          )}
-
-          {/* Animal role indicator - bottom right, responsive */}
-          {!isHunter && me?.isAlive && (
-            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm">
-              <p>
-                Role: <span className="text-green-400">Animal</span>
-              </p>
-              <p className="text-[10px] sm:text-xs text-gray-300">
-                Survive! Move to blend in.
-              </p>
-            </div>
-          )}
+            )}
 
           {/* Neutralized overlay */}
           {!me?.isAlive && !isHunter && (
@@ -331,15 +292,17 @@ export default function App() {
                 <p key={i} className="text-sm text-gray-300">{e}</p>
               ))}
             </div>
+            <p className="text-sm text-gray-300">
+              Returning to lobby {endCountdown !== null ? `in ${endCountdown}s` : "shortly"}...
+            </p>
             <button
               onPointerDown={(e) => {
                 e.preventDefault();
-                send({ type: "RESTART" });
-                setScreen("LOBBY");
+                returnToLobby();
               }}
               className="w-full px-6 py-4 rounded-lg bg-yellow-500 hover:bg-yellow-400 active:bg-yellow-600 text-black font-bold text-base sm:text-lg transition min-h-[56px] touch-manipulation select-none"
             >
-              Return to Lobby
+              Return to Lobby Now
             </button>
           </div>
         </div>

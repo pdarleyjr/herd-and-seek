@@ -1,18 +1,25 @@
 class SoundManager {
   private ctx: AudioContext | null = null;
   private enabled = true;
+  private unlocked = false;
+
+  unlock() {
+    if (this.unlocked) return;
+    try {
+      this.ctx = new (window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      if (this.ctx.state === "suspended") {
+        this.ctx.resume().catch(() => {});
+      }
+      this.unlocked = true;
+    } catch {
+      this.enabled = false;
+    }
+  }
 
   private getCtx(): AudioContext | null {
-    if (!this.enabled) return null;
-    if (!this.ctx) {
-      try {
-        this.ctx = new (window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      } catch {
-        this.enabled = false;
-        return null;
-      }
-    }
+    if (!this.enabled || !this.unlocked) return null;
+    if (!this.ctx) return null;
     if (this.ctx.state === "suspended") {
       this.ctx.resume().catch(() => {});
     }
@@ -23,7 +30,7 @@ class SoundManager {
     const ctx = this.getCtx();
     if (!ctx) return;
 
-    const duration = 0.12;
+    const duration = 0.15;
     const bufferSize = Math.floor(ctx.sampleRate * duration);
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -40,7 +47,7 @@ class SoundManager {
     filter.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + duration);
 
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.setValueAtTime(0.6, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
 
     source.connect(filter);
@@ -59,7 +66,7 @@ class SoundManager {
     osc.type = "sine";
     osc.frequency.setValueAtTime(250, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.25);
-    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -75,12 +82,28 @@ class SoundManager {
     osc.type = "triangle";
     osc.frequency.setValueAtTime(800, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.12);
+  }
+
+  perk() {
+    const ctx = this.getCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(400, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
   }
 
   gameStart() {
@@ -125,6 +148,10 @@ class SoundManager {
 
   isEnabled() {
     return this.enabled;
+  }
+
+  isUnlocked() {
+    return this.unlocked;
   }
 }
 

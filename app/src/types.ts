@@ -4,7 +4,7 @@ export type AnimalType =
   | "pig" | "rabbit" | "cow" | "duck"
   | "panda" | "parrot" | "owl" | "snake";
 
-export type PerkType = "sprint" | "camouflage" | "none";
+export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
 export interface PlayerState {
@@ -17,6 +17,7 @@ export interface PlayerState {
   isReady: boolean;
   isAlive: boolean;
   perk: PerkType;
+  extraLifeUsed?: boolean;
 }
 
 export interface NpcSeed {
@@ -44,7 +45,7 @@ export interface ServerMessage {
 }
 
 export interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY";
   payload?: any;
 }
 
@@ -67,25 +68,46 @@ export const ANIMAL_OPTIONS: { value: AnimalType; label: string; emoji: string }
   { value: "snake", label: "Snake", emoji: "🐍" },
 ];
 
-export const PERK_OPTIONS: { value: PerkType; label: string; description: string }[] = [
-  { value: "none", label: "No Perk", description: "Standard movement" },
+export const PERK_OPTIONS: { value: PerkType; label: string; description: string; emoji: string }[] = [
+  { value: "none", label: "No Perk", description: "Standard movement, no special ability", emoji: "🚫" },
   {
     value: "sprint",
     label: "Sprinting Dash",
-    description: "+50% speed for 1.5s, but reveals a dust cloud",
+    description: "+50% speed burst for 1.5s. Reveals a dust cloud!",
+    emoji: "💨",
   },
   {
     value: "camouflage",
     label: "Camouflage Freeze",
-    description: "Lock in place for 3s, mimicking a sleeping NPC",
+    description: "Freeze perfectly for 3s. No movement at all.",
+    emoji: "🫥",
+  },
+  {
+    value: "extraLife",
+    label: "Extra Life",
+    description: "Survive your first shot! Revives automatically once.",
+    emoji: "❤️",
+  },
+  {
+    value: "decoy",
+    label: "Decoy Drop",
+    description: "Spawn a fake animal copy at your position to confuse the hunter.",
+    emoji: "🎭",
+  },
+  {
+    value: "speedBoost",
+    label: "Speed Boost",
+    description: "Permanently +30% base movement speed. No downside!",
+    emoji: "⚡",
   },
 ];
 
 export const WORLD_SIZE = 2000;
-export const PLAYER_RADIUS = 32;
-export const NPC_RADIUS = 32;
-export const ANIMAL_SPEED = 3;
-export const HUNTER_SPEED = 3.5;
+export const PLAYER_COLLISION_RADIUS = 34;
+export const PLAYER_RENDER_RADIUS = 48;
+export const NPC_COLLISION_RADIUS = 32;
+export const ANIMAL_SPEED = 3.2;
+export const HUNTER_SPEED = 3.7;
 
 export const ALL_ANIMAL_TYPES: AnimalType[] = [
   "elephant", "penguin", "monkey", "giraffe",
