@@ -88,7 +88,7 @@ export default function App() {
         setScreen("GAME");
       }
     },
-    [userId, onEvent, gameState]
+    [userId, onEvent]
   );
 
   const { send, connected } = useGameSocket(userId, username, handleSocketMessage);

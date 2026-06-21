@@ -286,7 +286,7 @@ export default function PortraitLobby({
         )}
       </div>
 
-      // ─── Fixed bottom: Solo + Ready ───────────────────────────────
+      {/* ─── Fixed bottom: Solo + Ready ─────────────────────────────── */}
       <div
         className="shrink-0 px-4 flex flex-col gap-2"
         style={{

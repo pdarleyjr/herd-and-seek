@@ -11,6 +11,14 @@ export function useGameSocket(
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const reconnectRef = useRef(false);
+  // Keep latest message handler in a ref so the WebSocket connection is not
+  // torn down & rebuilt whenever the callback identity changes (e.g. on every
+  // game-state update). The connection effect depends only on the stable
+  // userId/username, guaranteeing a single persistent socket.
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  });
 
   const send = useCallback((msg: ClientMessage) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -34,7 +42,7 @@ export function useGameSocket(
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          onMessage(data);
+          onMessageRef.current(data);
         } catch {
           // ignore parse errors
         }
@@ -63,7 +71,7 @@ export function useGameSocket(
         wsRef.current.close();
       }
     };
-  }, [userId, username, onMessage]);
+  }, [userId, username]);
 
   return { send, connected };
 }
