@@ -123,10 +123,11 @@ export default function App() {
     returnToLobby();
   }, [endCountdown, returnToLobby]);
 
-  // Handle server-initiated return to lobby (server resets room after 5s countdown)
+  // Handle server-initiated return to lobby (server resets room after 5s countdown).
+  // Keep the server's freshly-broadcast lobby state (with our player still in it)
+  // instead of nulling it, so the post-game lobby immediately shows our player slot.
   useEffect(() => {
     if (gameState?.phase === "LOBBY" && screen === "GAME") {
-      setGameState(null);
       setScreen("LOBBY");
       setEndCountdown(null);
     }

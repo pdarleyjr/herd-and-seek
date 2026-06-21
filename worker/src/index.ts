@@ -580,6 +580,28 @@ endGame(winner: "hunter" | "animals", reason: string) {
         botLastShot: 0,
       });
       this.state.hunterId = botId;
+      // Spawn bot animal teammates so the human can blend into the herd.
+      // Without these, the human is the ONLY target and dies almost instantly.
+      const animalBots = Math.max(2, botCount - 1);
+      for (let i = 0; i < animalBots; i++) {
+        this.state.players.push({
+          id: `bot_animal_${i}_${Date.now()}`,
+          username: `Animal ${i + 1}`,
+          x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+          y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+          animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length],
+          isHunter: false,
+          isReady: true,
+          isAlive: true,
+          perk: "none",
+          extraLifeUsed: false,
+          isBot: true,
+          botVx: (Math.random() - 0.5) * 5,
+          botVy: (Math.random() - 0.5) * 5,
+          botLastDecision: 0,
+          botLastShot: 0,
+        });
+      }
     }
 
     // Reset human player for the match
@@ -642,7 +664,9 @@ endGame(winner: "hunter" | "animals", reason: string) {
   }
 
   updateBotHunter(bot: PlayerState, nowMs: number) {
-    const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive && !p.isBot);
+    // Chase ALL alive non-hunter animals (including bot teammates) so the
+    // human animal can blend into the herd instead of being the sole target.
+    const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive);
     if (targets.length === 0) return;
 
     let nearest = targets[0];
@@ -703,10 +727,12 @@ endGame(winner: "hunter" | "animals", reason: string) {
   }
 
   handleBotShoot(targetX: number, targetY: number) {
-    // Standard collision radius — same as human hunter, no generous bonus
+    // Standard collision radius — same as human hunter, no generous bonus.
+    // Can hit any alive non-hunter animal (including bot teammates) so the
+    // herd-blending mechanic works for solo animal players.
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
-      if (p.isHunter || !p.isAlive || p.isBot) continue;
+      if (p.isHunter || !p.isAlive) continue;
       const dist = Math.hypot(targetX - p.x, targetY - p.y);
       if (dist <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; }
     }
