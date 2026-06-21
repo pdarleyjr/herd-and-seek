@@ -333,12 +333,12 @@ export default function PortraitLobby({
                 >{r === "hunter" ? "🎯 Hunter" : r === "animal" ? "🐾 Animal" : "🎲 Random"}</button>
               ))}
             </div>
-            <button
-              onPointerDown={(e) => {
-                e.preventDefault();
-                if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
-                else onStartSolo();
-              }}
+<button
+               onPointerDown={(e) => {
+                 e.preventDefault();
+                 if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
+                 else if (onStartSolo) onStartSolo();
+               }}
               className="w-full rounded-2xl font-extrabold text-base uppercase tracking-wide select-none"
               style={{
                 minHeight: 52,
