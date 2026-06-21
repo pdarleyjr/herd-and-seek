@@ -151,9 +151,6 @@ export default function App() {
   }
 
   if (screen === "LOBBY" && (!gameState || gameState.phase === "LOBBY")) {
-    const me = gameState?.players.find((p) => p.id === userId);
-    const isReady = me?.isReady ?? false;
-
     return (
       <LobbyScene
         username={username}
@@ -173,9 +170,9 @@ export default function App() {
         onSetDuration={(seconds) => {
           send({ type: "SET_DURATION", payload: { duration: seconds } });
         }}
-        onReady={() => {
-          send({ type: "READY", payload: { isReady: !isReady } });
-        }}
+onReady={() => {
+           send({ type: "READY" });
+         }}
         onStart={() => {
           // Match starts automatically when all ready — no explicit start needed
         }}
