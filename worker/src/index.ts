@@ -17,6 +17,12 @@ export interface PlayerState {
   isAlive: boolean;
   perk: PerkType;
   extraLifeUsed: boolean;
+  // Bot / AI fields (undefined for human players)
+  isBot?: boolean;
+  botVx?: number;
+  botVy?: number;
+  botLastDecision?: number;
+  botLastShot?: number;
 }
 
 export interface NpcSeed {
@@ -38,10 +44,11 @@ interface RoomState {
   matchStartTime: number;
   winner: "hunter" | "animals" | null;
   eventLog: string[];
+  isSoloMode: boolean;
 }
 
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
   payload?: any;
 }
 
@@ -108,6 +115,7 @@ export class GameRoomDurableObject implements DurableObject {
       matchStartTime: 0,
       winner: null,
       eventLog: [],
+      isSoloMode: false,
     };
   }
 
@@ -199,6 +207,13 @@ export class GameRoomDurableObject implements DurableObject {
             type: "DECOY_SPAWN",
             payload: { x: player.x, y: player.y, animalType: player.animalType, ownerId: userId },
           });
+        }
+        break;
+
+      case "START_SOLO":
+        if (this.state.phase === "LOBBY" && !player.isBot) {
+          const role = parsed.payload?.role === "hunter" ? "hunter" : "animal";
+          this.startSoloMatch(userId, role);
         }
         break;
 
@@ -391,8 +406,15 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
   startSyncLoop() {
     if (this.syncInterval) clearInterval(this.syncInterval);
+    let lastBotTick = 0;
     this.syncInterval = setInterval(() => {
       if (this.state.phase === "PLAYING") {
+        const now = Date.now();
+        // Update bots every 50 ms (independent of 30 Hz broadcast)
+        if (this.state.isSoloMode && now - lastBotTick >= 50) {
+          lastBotTick = now;
+          this.updateBots(now);
+        }
         this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() });
       }
     }, 1000 / 30);
@@ -429,10 +451,13 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.state.hunterId = null;
     this.state.ammo = 0;
     this.state.maxAmmo = 0;
-    this.state.timeRemaining = this.state.matchDuration; // preserve chosen duration
+    this.state.timeRemaining = this.state.matchDuration;
     this.state.winner = null;
     this.state.npcSeeds = [];
     this.state.eventLog = [];
+    this.state.isSoloMode = false;
+    // Remove bot players; reset human players
+    this.state.players = this.state.players.filter((p) => !p.isBot);
     this.state.players.forEach((p) => {
       p.isHunter = false;
       p.isReady = false;
@@ -456,6 +481,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
         isAlive: p.isAlive,
         perk: p.perk,
         extraLifeUsed: p.extraLifeUsed,
+        isBot: p.isBot ?? false,
       })),
       npcSeeds: this.state.npcSeeds,
       hunterId: this.state.hunterId,
@@ -482,6 +508,191 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
   broadcastState() {
     this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() });
+  }
+
+  // ── Solo / Bot system ─────────────────────────────────────────────────────
+
+  startSoloMatch(humanId: string, humanRole: "hunter" | "animal") {
+    if (this.state.phase !== "LOBBY") return;
+    const human = this.state.players.find((p) => p.id === humanId);
+    if (!human) return;
+
+    // Remove any leftover bots
+    this.state.players = this.state.players.filter((p) => !p.isBot);
+
+    const BOT_ANIMAL_TYPES: AnimalType[] = ["elephant", "monkey", "giraffe", "bear", "pig"];
+
+    if (humanRole === "hunter") {
+      human.isHunter = true;
+      // Spawn 4 bot animals
+      for (let i = 0; i < 4; i++) {
+        this.state.players.push({
+          id: `bot_animal_${i}_${Date.now()}`,
+          username: `Animal ${i + 1}`,
+          x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+          y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+          animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length],
+          isHunter: false,
+          isReady: true,
+          isAlive: true,
+          perk: "none",
+          extraLifeUsed: false,
+          isBot: true,
+          botVx: (Math.random() - 0.5) * 5,
+          botVy: (Math.random() - 0.5) * 5,
+          botLastDecision: 0,
+          botLastShot: 0,
+        });
+      }
+      this.state.hunterId = human.id;
+    } else {
+      human.isHunter = false;
+      // Spawn 1 bot hunter
+      const botId = `bot_hunter_${Date.now()}`;
+      this.state.players.push({
+        id: botId,
+        username: "🤖 AI Hunter",
+        x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+        y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
+        animalType: "elephant",
+        isHunter: true,
+        isReady: true,
+        isAlive: true,
+        perk: "none",
+        extraLifeUsed: false,
+        isBot: true,
+        botVx: 0,
+        botVy: 0,
+        botLastDecision: 0,
+        botLastShot: 0,
+      });
+      this.state.hunterId = botId;
+    }
+
+    // Reset human player for the match
+    human.isAlive = true;
+    human.isReady = false;
+    human.extraLifeUsed = false;
+    human.x = Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150;
+    human.y = Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150;
+
+    const animalCount = this.state.players.filter((p) => !p.isHunter).length;
+    this.state.ammo = animalCount * 10;
+    this.state.maxAmmo = animalCount * 10;
+    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length));
+    this.state.phase = "PLAYING";
+    this.state.timeRemaining = this.state.matchDuration;
+    this.state.matchStartTime = Date.now();
+    this.state.winner = null;
+    this.state.isSoloMode = true;
+    this.state.eventLog = [
+      humanRole === "hunter"
+        ? `Solo practice: You are the Hunter. Find the 4 AI animals!`
+        : `Solo practice: You are an Animal. Survive the AI Hunter!`,
+    ];
+
+    this.startSyncLoop();
+    this.startCountdown();
+    this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
+  }
+
+  updateBots(nowMs: number) {
+    for (const p of this.state.players) {
+      if (!p.isBot || !p.isAlive) continue;
+      if (p.isHunter) {
+        this.updateBotHunter(p, nowMs);
+      } else {
+        this.updateBotAnimal(p, nowMs);
+      }
+    }
+  }
+
+  updateBotAnimal(bot: PlayerState, nowMs: number) {
+    const lastDecision = bot.botLastDecision ?? 0;
+    // Change direction every 2–4 seconds
+    if (nowMs - lastDecision > 2000 + Math.random() * 2000) {
+      bot.botLastDecision = nowMs;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2.6 + Math.random() * 1.2;
+      bot.botVx = Math.cos(angle) * speed;
+      bot.botVy = Math.sin(angle) * speed;
+      // Occasionally idle (30% chance)
+      if (Math.random() < 0.3) { bot.botVx = 0; bot.botVy = 0; }
+    }
+    const vx = bot.botVx ?? 0;
+    const vy = bot.botVy ?? 0;
+    bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + vx));
+    bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + vy));
+    if (bot.x <= 60 || bot.x >= WORLD_SIZE - 60) bot.botVx = -(bot.botVx ?? 0);
+    if (bot.y <= 60 || bot.y >= WORLD_SIZE - 60) bot.botVy = -(bot.botVy ?? 0);
+  }
+
+  updateBotHunter(bot: PlayerState, nowMs: number) {
+    // Find nearest living human animal
+    const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive && !p.isBot);
+    if (targets.length === 0) return;
+
+    // Simple targeting: pick nearest human
+    let nearest = targets[0];
+    let nearestDist = Infinity;
+    for (const t of targets) {
+      const d = Math.hypot(t.x - bot.x, t.y - bot.y);
+      if (d < nearestDist) { nearestDist = d; nearest = t; }
+    }
+
+    const dx = nearest.x - bot.x;
+    const dy = nearest.y - bot.y;
+    const dist = Math.hypot(dx, dy);
+
+    // Move toward target at 88% of normal hunter speed
+    const SPEED = 3.2;
+    if (dist > 20) {
+      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (dx / dist) * SPEED));
+      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (dy / dist) * SPEED));
+    }
+
+    // Shoot when within range with 1.8s cooldown + 8° aim error
+    const lastShot = bot.botLastShot ?? 0;
+    const DETECTION_RANGE = 380;
+    if (dist < DETECTION_RANGE && nowMs - lastShot > 1800) {
+      bot.botLastShot = nowMs;
+      const aimError = (Math.random() - 0.5) * (8 * Math.PI / 180) * 2;
+      const aimAngle = Math.atan2(dy, dx) + aimError;
+      const targetX = bot.x + Math.cos(aimAngle) * 500;
+      const targetY = bot.y + Math.sin(aimAngle) * 500;
+      this.handleBotShoot(targetX, targetY);
+    }
+  }
+
+  handleBotShoot(targetX: number, targetY: number) {
+    // Bot hunter shoots — only hits human (non-bot) animals
+    let hitPlayer: PlayerState | null = null;
+    for (const p of this.state.players) {
+      if (p.isHunter || !p.isAlive || p.isBot) continue;
+      const dist = Math.hypot(targetX - p.x, targetY - p.y);
+      if (dist <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; }
+    }
+
+    if (hitPlayer) {
+      if (hitPlayer.perk === "extraLife" && !hitPlayer.extraLifeUsed) {
+        hitPlayer.animalType = randomAnimalExcept(hitPlayer.animalType);
+        hitPlayer.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+        hitPlayer.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+        hitPlayer.perk = "none";
+        hitPlayer.extraLifeUsed = true;
+        this.state.eventLog.unshift(`${hitPlayer.username}'s Extra Life saved them!`);
+        this.broadcast({ type: "HIT", payload: { targetId: hitPlayer.id, targetX, targetY, hit: true, extraLife: true, animalType: hitPlayer.animalType, x: hitPlayer.x, y: hitPlayer.y } });
+      } else {
+        hitPlayer.isAlive = false;
+        this.state.eventLog.unshift(`${hitPlayer.username} was tagged by the AI Hunter!`);
+        this.broadcast({ type: "HIT", payload: { targetId: hitPlayer.id, targetX, targetY, hit: true } });
+        this.checkWinCondition();
+      }
+    } else {
+      this.state.eventLog.unshift("AI Hunter missed!");
+      this.broadcast({ type: "HIT", payload: { targetId: null, targetX, targetY, hit: false } });
+    }
+    this.state.eventLog = this.state.eventLog.slice(0, 10);
   }
 }
 

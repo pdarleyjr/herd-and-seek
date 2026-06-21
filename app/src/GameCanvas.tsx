@@ -106,11 +106,12 @@ function getAnimalImage(
 
 function generateTrees(): TreeEntity[] {
   const trees: TreeEntity[] = [];
-  const count = 60;
+  const count = 85; // denser forest
   for (let i = 0; i < count; i++) {
     const r = Math.random();
+    // More bushes in forest (30%), balanced green/brown trees
     const type: TreeEntity["type"] =
-      r < 0.5 ? "green" : r < 0.78 ? "brown" : "bush";
+      r < 0.45 ? "green" : r < 0.70 ? "brown" : "bush";
     trees.push({
       x: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
       y: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
@@ -122,14 +123,14 @@ function generateTrees(): TreeEntity[] {
 
 function generateRocks(): RockEntity[] {
   const rocks: RockEntity[] = [];
-  const count = 30;
+  const count = 45; // more rock clusters for cover
   for (let i = 0; i < count; i++) {
-    const large = i < 9;
+    const large = i < 12;
     rocks.push({
       x: Math.floor(Math.random() * (WORLD_SIZE - 240)) + 120,
       y: Math.floor(Math.random() * (WORLD_SIZE - 240)) + 120,
-      rx: large ? 28 + Math.random() * 18 : 12 + Math.random() * 11,
-      ry: large ? 18 + Math.random() * 12 : 7 + Math.random() * 8,
+      rx: large ? 28 + Math.random() * 20 : 12 + Math.random() * 12,
+      ry: large ? 18 + Math.random() * 12 : 7 + Math.random() * 9,
       rotation: Math.random() * Math.PI,
       colorIdx: Math.floor(Math.random() * 3),
     });
@@ -139,15 +140,16 @@ function generateRocks(): RockEntity[] {
 
 function generateGrassPatches(): GrassPatch[] {
   const patches: GrassPatch[] = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 70; i++) { // denser undergrowth for hiding
+    const tall = i < 30; // first 30 are definitely tall (hiding spots)
     patches.push({
       x: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
       y: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
-      count: 5 + Math.floor(Math.random() * 5),
-      spread: 16 + Math.floor(Math.random() * 20),
-      tall: Math.random() < 0.4,
+      count: tall ? 7 + Math.floor(Math.random() * 5) : 4 + Math.floor(Math.random() * 4),
+      spread: tall ? 22 + Math.floor(Math.random() * 22) : 14 + Math.floor(Math.random() * 16),
+      tall,
       seed: Math.floor(Math.random() * 9999) + 1,
-      withFlower: Math.random() < 0.28,
+      withFlower: !tall && Math.random() < 0.35,
     });
   }
   return patches;
@@ -506,8 +508,8 @@ const updateLocalPlayer = useCallback(() => {
     const { w, h } = canvasSizeRef.current;
     ctx.clearRect(0, 0, w, h);
 
-    // ── Rich terrain base ──────────────────────────────────────────────────
-    ctx.fillStyle = "#4a8a30";
+    // ── Rich forest terrain base ────────────────────────────────────────────
+    ctx.fillStyle = "#3d7a25"; // darker, denser forest green
     ctx.fillRect(0, 0, w, h);
 
     const state = serverStateRef.current;
@@ -1209,6 +1211,43 @@ if (me && me.isAlive && me.isHunter) {
       }
     }
 
+    // ── Cover / hiding indicator for animals ───────────────────────────
+    if (me && !me.isHunter && me.isAlive && state.phase === "PLAYING") {
+      const px = localPosRef.current.x;
+      const py = localPosRef.current.y;
+      const COVER_RADIUS = 42; // world units — must be inside the patch
+      const inCover = grassPatchesRef.current.some((patch) => {
+        if (!patch.tall) return false;
+        const d = Math.hypot(px - patch.x, py - patch.y);
+        return d < patch.spread + COVER_RADIUS;
+      });
+
+      if (inCover) {
+        const screenX = px - camX;
+        const screenY = py - camY;
+        // Green glow around player
+        const coverGrd = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, 44);
+        coverGrd.addColorStop(0, "rgba(60,200,40,0.28)");
+        coverGrd.addColorStop(1, "rgba(60,200,40,0)");
+        ctx.fillStyle = coverGrd;
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 44, 0, Math.PI * 2);
+        ctx.fill();
+        // "HIDDEN" badge
+        ctx.fillStyle = "rgba(20,90,10,0.85)";
+        ctx.beginPath();
+        ctx.roundRect(screenX - 34, screenY - 68, 68, 18, 5);
+        ctx.fill();
+        ctx.fillStyle = "#7fff00";
+        ctx.font = "bold 10px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🌿 HIDDEN", screenX, screenY - 59);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      }
+    }
+
     gameTickRef.current++;
   }, [assets, userId, localPosRef, username]);
 
@@ -1443,18 +1482,8 @@ decoysRef.current.push({
         aimRef.current.active = false;
         aimRef.current.touchId = null;
 
-        // TAP = short duration (<350ms) AND small movement (<35px) → fire at that position
-        const elapsed = Date.now() - aimTapStartTimeRef.current;
-        const moveDx = e.clientX - aimTapStartXRef.current;
-        const moveDy = e.clientY - aimTapStartYRef.current;
-        const moveDist = Math.sqrt(moveDx * moveDx + moveDy * moveDy);
-
-        if (elapsed < 350 && moveDist < 35) {
-          const worldX = e.clientX + cameraRef.current.x;
-          const worldY = e.clientY + cameraRef.current.y;
-          fireShot(worldX, worldY);
-        }
-        // Drag: keep aim target visible, don't auto-fire
+        // Drag to aim — tap-to-fire removed to eliminate accidental misfires.
+        // Use the FIRE button (bottom-right) to shoot.
         setAimVisual({ visible: false, x: 0, y: 0 });
       }
     };

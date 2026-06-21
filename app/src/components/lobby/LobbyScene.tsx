@@ -7,6 +7,7 @@ import UpgradePanel from "./UpgradePanel";
 import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
 import PortraitLobby from "./PortraitLobby";
+import HowToPlayPanel from "./HowToPlayPanel";
 import { useIsPortrait } from "../../hooks/useIsPortrait";
 import type { SerializedState, AnimalType, PerkType } from "../../types";
 
@@ -31,6 +32,7 @@ interface LobbySceneProps {
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
   onStart: () => void;
+  onStartSolo?: (role: "hunter" | "animal") => void;
 }
 
 export default function LobbyScene({
@@ -45,6 +47,7 @@ export default function LobbyScene({
   onSetDuration,
   onReady,
   onStart,
+  onStartSolo,
 }: LobbySceneProps) {
   const isPortrait = useIsPortrait();
 
@@ -71,6 +74,7 @@ export default function LobbyScene({
         onSetDuration={onSetDuration}
         onReady={onReady}
         onStart={onStart}
+        onStartSolo={onStartSolo}
       />
     );
   }
@@ -130,8 +134,25 @@ export default function LobbyScene({
           />
         </div>
 
-        {/* BOTTOM-LEFT: Player list */}
-        <div className="pointer-events-auto flex items-end">
+        {/* BOTTOM-LEFT: Player list + solo + how to play */}
+        <div className="pointer-events-auto flex flex-col items-start gap-2 justify-end">
+          <div className="w-full max-w-[220px]">
+            <HowToPlayPanel collapsed />
+          </div>
+          {onStartSolo && playerCount < 2 && (
+            <div className="flex gap-1.5 w-full max-w-[220px]">
+              <button
+                onPointerDown={(e) => { e.preventDefault(); onStartSolo("hunter"); }}
+                className="flex-1 py-1.5 rounded-xl font-bold text-xs select-none"
+                style={{ background: "linear-gradient(180deg,#cc4020,#8c2010)", border: "1px solid #ff6040", color: "#fff", touchAction: "manipulation" }}
+              >🎯 Solo Hunter</button>
+              <button
+                onPointerDown={(e) => { e.preventDefault(); onStartSolo("animal"); }}
+                className="flex-1 py-1.5 rounded-xl font-bold text-xs select-none"
+                style={{ background: "linear-gradient(180deg,#2a8c18,#185c0a)", border: "1px solid #7fff00", color: "#7fff00", touchAction: "manipulation" }}
+              >🐾 Solo Animal</button>
+            </div>
+          )}
           <PlayerList gameState={gameState} userId={userId} />
         </div>
 
@@ -273,7 +294,7 @@ function GameModeInfo({
       </div>
       <div className="flex items-center gap-2 justify-end mt-0.5">
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Map</span>
-        <span className="text-[#f5d07a] text-xs font-bold">Savanna</span>
+        <span className="text-[#f5d07a] text-xs font-bold">Forrest</span>
       </div>
 
       {/* Time row — interactive */}

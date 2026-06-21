@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MorphPanel from "./MorphPanel";
 import UpgradePanel from "./UpgradePanel";
+import HowToPlayPanel from "./HowToPlayPanel";
 import type { SerializedState, AnimalType, PerkType } from "../../types";
 
 type Tab = "morphs" | "upgrades" | "settings";
@@ -26,6 +27,7 @@ interface PortraitLobbyProps {
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
   onStart: () => void;
+  onStartSolo?: (role: "hunter" | "animal") => void;
 }
 
 function fmtTime(s: number): string {
@@ -46,6 +48,7 @@ export default function PortraitLobby({
   onSetDuration,
   onReady,
   onStart: _onStart,
+  onStartSolo,
 }: PortraitLobbyProps) {
   const [tab, setTab] = useState<Tab>("morphs");
 
@@ -266,10 +269,38 @@ export default function PortraitLobby({
                 </div>
                 <div>
                   <div className="text-[#c8a05a] text-[10px] uppercase tracking-wide">Map</div>
-                  <div className="text-[#f5d07a] font-bold">Savanna</div>
+                  <div className="text-[#f5d07a] font-bold">Forrest</div>
                 </div>
               </div>
             </Section>
+
+            {/* How to Play */}
+            <HowToPlayPanel collapsed />
+
+            {/* Solo Practice */}
+            {onStartSolo && (
+              <Section title="Solo Practice 🤖">
+                <p className="text-[#c8a05a] text-xs mb-3">
+                  Play alone against AI-controlled opponents. Great for learning the game!
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onPointerDown={(e) => { e.preventDefault(); onStartSolo("hunter"); }}
+                    className="flex-1 py-2 rounded-xl font-bold text-sm select-none"
+                    style={{ background: "linear-gradient(180deg,#cc4020,#8c2010)", border: "2px solid #ff6040", color: "#fff", touchAction: "manipulation" }}
+                  >
+                    🎯 Play Hunter
+                  </button>
+                  <button
+                    onPointerDown={(e) => { e.preventDefault(); onStartSolo("animal"); }}
+                    className="flex-1 py-2 rounded-xl font-bold text-sm select-none"
+                    style={{ background: "linear-gradient(180deg,#2a8c18,#185c0a)", border: "2px solid #7fff00", color: "#7fff00", touchAction: "manipulation" }}
+                  >
+                    🐾 Play Animal
+                  </button>
+                </div>
+              </Section>
+            )}
           </div>
         )}
       </div>

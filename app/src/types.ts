@@ -18,6 +18,7 @@ export interface PlayerState {
   isAlive: boolean;
   perk: PerkType;
   extraLifeUsed?: boolean;
+  isBot?: boolean; // true for AI-controlled solo practice opponents
 }
 
 export interface NpcSeed {
@@ -46,7 +47,7 @@ export interface ServerMessage {
 }
 
 export interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
   payload?: any;
 }
 
