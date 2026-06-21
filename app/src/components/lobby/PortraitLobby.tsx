@@ -27,7 +27,7 @@ interface PortraitLobbyProps {
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
   onStart: () => void;
-  onStartSolo?: (role: "hunter" | "animal") => void;
+  onStartSolo?: () => void;
 }
 
 function fmtTime(s: number): string {
@@ -173,7 +173,7 @@ export default function PortraitLobby({
       </div>
 
       {/* ─── Tab content (scrollable) ───────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: "contain" }}>
+      <div className="flex-1 overflow-y-auto min-h-0" style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         {tab === "morphs" && (
           <div className="p-3">
             <MorphPanel selected={selectedAnimal} onSelect={onSelectAnimal} disabled={inGame} />
@@ -277,44 +277,44 @@ export default function PortraitLobby({
             {/* How to Play */}
             <HowToPlayPanel collapsed />
 
-            {/* Solo Practice */}
-            {onStartSolo && (
-              <Section title="Solo Practice 🤖">
-                <p className="text-[#c8a05a] text-xs mb-3">
-                  Play alone against AI-controlled opponents. Great for learning the game!
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onPointerDown={(e) => { e.preventDefault(); onStartSolo("hunter"); }}
-                    className="flex-1 py-2 rounded-xl font-bold text-sm select-none"
-                    style={{ background: "linear-gradient(180deg,#cc4020,#8c2010)", border: "2px solid #ff6040", color: "#fff", touchAction: "manipulation" }}
-                  >
-                    🎯 Play Hunter
-                  </button>
-                  <button
-                    onPointerDown={(e) => { e.preventDefault(); onStartSolo("animal"); }}
-                    className="flex-1 py-2 rounded-xl font-bold text-sm select-none"
-                    style={{ background: "linear-gradient(180deg,#2a8c18,#185c0a)", border: "2px solid #7fff00", color: "#7fff00", touchAction: "manipulation" }}
-                  >
-                    🐾 Play Animal
-                  </button>
-                </div>
-              </Section>
-            )}
+            {/* How-to-play already shown; solo button moves to bottom bar */}
           </div>
         )}
       </div>
 
-      {/* ─── Fixed bottom: Ready button ─────────────────────────────── */}
+      {/* ─── Fixed bottom: Solo + Ready ─────────────────────────────── */}
       <div
-        className="shrink-0 px-4 flex flex-col gap-1.5"
+        className="shrink-0 px-4 flex flex-col gap-2"
         style={{
           paddingTop: 12,
           paddingBottom: "max(16px, env(safe-area-inset-bottom, 16px))",
-          background: "rgba(0,0,0,0.5)",
-          borderTop: "1px solid #3d2210",
+          background: "rgba(0,0,0,0.55)",
+          borderTop: "2px solid #3d2210",
         }}
       >
+        {/* Play Solo button — shown only when waiting for players */}
+        {onStartSolo && playerCount < 2 && (
+          <button
+            onPointerDown={(e) => {
+              e.preventDefault();
+              onStartSolo();
+            }}
+            className="w-full rounded-2xl font-extrabold text-base uppercase tracking-wide select-none"
+            style={{
+              minHeight: 52,
+              background: "linear-gradient(180deg,#c8900a,#8a5e06)",
+              border: "2px solid #f5c030",
+              color: "#fff8dc",
+              textShadow: "0 1px 3px rgba(0,0,0,0.5)",
+              boxShadow: "0 0 16px rgba(200,144,10,0.35)",
+              touchAction: "manipulation",
+            }}
+          >
+            🎮 Play Solo vs AI
+          </button>
+        )}
+
+        {/* Multiplayer Ready button */}
         <button
           onPointerDown={(e) => {
             e.preventDefault();
@@ -327,14 +327,14 @@ export default function PortraitLobby({
             minHeight: 56,
             textShadow: "0 1px 3px rgba(0,0,0,0.4)",
             touchAction: "manipulation",
-            opacity: !canReady ? 0.6 : 1,
+            opacity: !canReady ? 0.55 : 1,
           }}
         >
           {readyLabel}
         </button>
         {isReady && !allReady && (
           <p className="text-center text-[#c8a05a] text-xs animate-pulse">
-            Waiting for others...
+            Waiting for others to ready up...
           </p>
         )}
       </div>

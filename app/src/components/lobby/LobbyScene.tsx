@@ -32,7 +32,7 @@ interface LobbySceneProps {
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
   onStart: () => void;
-  onStartSolo?: (role: "hunter" | "animal") => void;
+  onStartSolo?: () => void;
 }
 
 export default function LobbyScene({
@@ -140,18 +140,11 @@ export default function LobbyScene({
             <HowToPlayPanel collapsed />
           </div>
           {onStartSolo && playerCount < 2 && (
-            <div className="flex gap-1.5 w-full max-w-[220px]">
-              <button
-                onPointerDown={(e) => { e.preventDefault(); onStartSolo("hunter"); }}
-                className="flex-1 py-1.5 rounded-xl font-bold text-xs select-none"
-                style={{ background: "linear-gradient(180deg,#cc4020,#8c2010)", border: "1px solid #ff6040", color: "#fff", touchAction: "manipulation" }}
-              >🎯 Solo Hunter</button>
-              <button
-                onPointerDown={(e) => { e.preventDefault(); onStartSolo("animal"); }}
-                className="flex-1 py-1.5 rounded-xl font-bold text-xs select-none"
-                style={{ background: "linear-gradient(180deg,#2a8c18,#185c0a)", border: "1px solid #7fff00", color: "#7fff00", touchAction: "manipulation" }}
-              >🐾 Solo Animal</button>
-            </div>
+            <button
+              onPointerDown={(e) => { e.preventDefault(); onStartSolo(); }}
+              className="w-full max-w-[220px] py-2 rounded-xl font-bold text-sm select-none"
+              style={{ background: "linear-gradient(180deg,#d4a010,#a07808)", border: "2px solid #f5d07a", color: "#000", touchAction: "manipulation" }}
+            >🎮 Play Solo vs AI</button>
           )}
           <PlayerList gameState={gameState} userId={userId} />
         </div>

@@ -180,8 +180,9 @@ export default function App() {
         onStart={() => {
           // Match starts automatically when all ready — no explicit start needed
         }}
-        onStartSolo={(role) => {
-          send({ type: "START_SOLO", payload: { role } });
+        onStartSolo={() => {
+          // No role specified — server randomly assigns hunter or animal
+          send({ type: "START_SOLO", payload: {} });
         }}
       />
     );

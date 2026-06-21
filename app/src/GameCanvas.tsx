@@ -1297,45 +1297,50 @@ decoysRef.current.push({
     }
   }, [userId, send, localPosRef]);
 
-// targetWorldX/Y = explicit tap position (mobile tap-to-fire)
-   // omit both to fire along current aimAngleRef (fire button / keyboard)
-   const fireShot = useCallback((targetWorldX?: number, targetWorldY?: number) => {
-     const state = serverStateRef.current;
-     if (!state || state.phase !== "PLAYING") return;
-     const me = state.players.find((p) => p.id === userId);
-     if (!me || !me.isHunter || !me.isAlive) return;
+  // Shoot at the current aim world position (crosshair / mouse / drag target).
+  // Server does a point-vs-player check — target must be near an actual player.
+  const fireShot = useCallback(() => {
+    const state = serverStateRef.current;
+    if (!state || state.phase !== "PLAYING") return;
+    const me = state.players.find((p) => p.id === userId);
+    if (!me || !me.isHunter || !me.isAlive) return;
 
-     let tX: number;
-     let tY: number;
+    // Resolve target: aim drag position (mobile) → mouse world pos (desktop) → forward fallback
+    let tX: number;
+    let tY: number;
 
-     if (targetWorldX !== undefined && targetWorldY !== undefined) {
-       // Tap-to-fire: shoot exactly at the tapped world position
-       tX = targetWorldX;
-       tY = targetWorldY;
-     } else {
-       // Fire button / keyboard: fire along current aim angle
-       const SHOT_RANGE = 800;
-       const angle = aimAngleRef.current;
-       tX = localPosRef.current.x + Math.cos(angle) * SHOT_RANGE;
-       tY = localPosRef.current.y + Math.sin(angle) * SHOT_RANGE;
-     }
+    if (aimTargetRef.current) {
+      // Mobile drag or previous aim target — this is the crosshair's exact world location
+      tX = aimTargetRef.current.worldX;
+      tY = aimTargetRef.current.worldY;
+    } else if (!isMobile && (mouseRef.current.worldX !== 0 || mouseRef.current.worldY !== 0)) {
+      // Desktop — fire exactly at the mouse cursor world position
+      tX = mouseRef.current.worldX;
+      tY = mouseRef.current.worldY;
+    } else {
+      // Last-resort fallback: fire forward along aim angle (600 units)
+      const a = aimAngleRef.current;
+      tX = localPosRef.current.x + Math.cos(a) * 600;
+      tY = localPosRef.current.y + Math.sin(a) * 600;
+    }
 
-     // Update aim angle and hunter rotation toward the shot direction
-     const dx = tX - localPosRef.current.x;
-     const dy = tY - localPosRef.current.y;
-     aimAngleRef.current = Math.atan2(dy, dx);
-     hunterAngleRef.current = aimAngleRef.current + Math.PI / 2;
+    // Keep aim angle consistent with shot direction
+    const dx = tX - localPosRef.current.x;
+    const dy = tY - localPosRef.current.y;
+    aimAngleRef.current = Math.atan2(dy, dx);
+    hunterAngleRef.current = aimAngleRef.current + Math.PI / 2;
+    aimTargetRef.current = { worldX: tX, worldY: tY };
 
-     // Keep crosshair at the fired position
-     aimTargetRef.current = { worldX: tX, worldY: tY };
+    const muzzle = {
+      x: localPosRef.current.x + Math.cos(aimAngleRef.current) * 40,
+      y: localPosRef.current.y + Math.sin(aimAngleRef.current) * 40,
+    };
+    muzzleFlashesRef.current.push({ x: muzzle.x, y: muzzle.y, life: 8 });
+    hitMarkersRef.current.push({ x: tX, y: tY, life: 30, hit: false });
 
-     const muzzle = { x: localPosRef.current.x + Math.cos(aimAngleRef.current) * 40, y: localPosRef.current.y + Math.sin(aimAngleRef.current) * 40 };
-     muzzleFlashesRef.current.push({ x: muzzle.x, y: muzzle.y, life: 8 });
-     hitMarkersRef.current.push({ x: tX, y: tY, life: 30, hit: false });
-
-     soundManager.gunshot();
-     send({ type: "SHOOT", payload: { targetX: tX, targetY: tY } });
-   }, [userId, send, localPosRef, aimAngleRef, aimTargetRef]);
+    soundManager.gunshot();
+    send({ type: "SHOOT", payload: { targetX: tX, targetY: tY } });
+  }, [userId, send, localPosRef, aimAngleRef, aimTargetRef, isMobile]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1574,29 +1579,46 @@ decoysRef.current.push({
 
       {isMobile && currentMe?.isHunter && gameState?.phase === "PLAYING" && (
         <>
-          {/* Hunter hint — top of right half */}
-          <div
-            className="absolute top-20 z-10 pointer-events-none text-center"
-            style={{ left: "45%", right: 0 }}
-          >
-            <span className="inline-block bg-black/60 text-white/80 text-xs px-3 py-1 rounded-full">
-              👆 Tap to shoot · Drag to aim
-            </span>
-          </div>
+          {/* Hunter control hint — only shows first few seconds */}
+          {gameState.timeRemaining > (gameState.matchDuration - 8) && (
+            <div
+              className="absolute z-10 pointer-events-none"
+              style={{ top: "22%", left: "46%", right: "2%", textAlign: "center" }}
+            >
+              <div className="inline-flex flex-col gap-1 bg-black/70 rounded-xl px-4 py-2">
+                <span className="text-white/90 text-sm font-bold">🎮 Hunter Controls</span>
+                <span className="text-white/70 text-xs">Drag right → Aim crosshair</span>
+                <span className="text-red-300 text-xs font-bold">Big red button → FIRE</span>
+              </div>
+            </div>
+          )}
 
-          {/* Fire button — larger, centered bottom-right, fires along current aim */}
-          <div className="absolute bottom-6 z-10" style={{ right: "calc(27.5% - 40px)" }}>
+          {/* FIRE button — prominent, bottom-right, hard to miss */}
+          <div
+            className="absolute z-10"
+            style={{
+              bottom: "max(20px, env(safe-area-inset-bottom, 20px))",
+              right: "max(16px, env(safe-area-inset-right, 16px))",
+            }}
+          >
             <button
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 fireShot();
               }}
-              className="w-20 h-20 rounded-full bg-red-600/90 border-4 border-red-300/90 flex flex-col items-center justify-center active:scale-90 transition-transform select-none shadow-[0_0_20px_rgba(255,60,60,0.5)]"
-              style={{ touchAction: "manipulation" }}
+              className="rounded-full flex flex-col items-center justify-center active:scale-90 transition-transform select-none"
+              style={{
+                width: 96,
+                height: 96,
+                background: "radial-gradient(circle at 38% 32%, #ff6060, #cc1010)",
+                border: "4px solid rgba(255,140,140,0.9)",
+                boxShadow: "0 0 28px rgba(255,40,40,0.65), 0 4px 12px rgba(0,0,0,0.5)",
+                touchAction: "manipulation",
+              }}
             >
-              <span className="text-3xl">🔫</span>
-              <span className="text-white text-[10px] font-bold leading-tight">FIRE</span>
+              <span style={{ fontSize: 32, lineHeight: 1 }}>🔫</span>
+              <span style={{ color: "white", fontSize: 13, fontWeight: 900, letterSpacing: "0.12em", marginTop: 2 }}>FIRE</span>
             </button>
           </div>
         </>

@@ -212,7 +212,11 @@ export class GameRoomDurableObject implements DurableObject {
 
       case "START_SOLO":
         if (this.state.phase === "LOBBY" && !player.isBot) {
-          const role = parsed.payload?.role === "hunter" ? "hunter" : "animal";
+          // If no role specified (or "random"), server randomly assigns hunter/animal
+          let role: "hunter" | "animal";
+          if (parsed.payload?.role === "hunter") role = "hunter";
+          else if (parsed.payload?.role === "animal") role = "animal";
+          else role = Math.random() < 0.5 ? "hunter" : "animal";
           this.startSoloMatch(userId, role);
         }
         break;
@@ -651,26 +655,27 @@ endGame(winner: "hunter" | "animals", reason: string) {
       bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (dy / dist) * SPEED));
     }
 
-    // Shoot when within range with 1.8s cooldown + 8° aim error
+    // Shoot when within range with 1.8s cooldown — aim at actual player position + noise
     const lastShot = bot.botLastShot ?? 0;
     const DETECTION_RANGE = 380;
     if (dist < DETECTION_RANGE && nowMs - lastShot > 1800) {
       bot.botLastShot = nowMs;
-      const aimError = (Math.random() - 0.5) * (8 * Math.PI / 180) * 2;
-      const aimAngle = Math.atan2(dy, dx) + aimError;
-      const targetX = bot.x + Math.cos(aimAngle) * 500;
-      const targetY = bot.y + Math.sin(aimAngle) * 500;
+      // Positional error: ±40 world units (beatable but threatening)
+      const errorX = (Math.random() - 0.5) * 80;
+      const errorY = (Math.random() - 0.5) * 80;
+      const targetX = nearest.x + errorX;
+      const targetY = nearest.y + errorY;
       this.handleBotShoot(targetX, targetY);
     }
   }
 
   handleBotShoot(targetX: number, targetY: number) {
-    // Bot hunter shoots — only hits human (non-bot) animals
+    // Bot hunter shoots — uses generous collision radius (60) for fair detection
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
       if (p.isHunter || !p.isAlive || p.isBot) continue;
       const dist = Math.hypot(targetX - p.x, targetY - p.y);
-      if (dist <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; }
+      if (dist <= PLAYER_COLLISION_RADIUS * 1.8) { hitPlayer = p; break; }
     }
 
     if (hitPlayer) {
