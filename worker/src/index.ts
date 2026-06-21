@@ -17,6 +17,9 @@ export interface PlayerState {
   isAlive: boolean;
   perk: PerkType;
   extraLifeUsed: boolean;
+  // Per-connection ownership tag (humans). Identifies which live WebSocket
+  // owns this player entry so stale close handlers don't evict a reconnect.
+  connId?: string;
   // Bot / AI fields (undefined for human players)
   isBot?: boolean;
   botVx?: number;
@@ -134,6 +137,12 @@ export class GameRoomDurableObject implements DurableObject {
     const url = new URL(request.url);
     const userId = url.searchParams.get("userId") || crypto.randomUUID();
     const username = url.searchParams.get("username") || "Anonymous";
+    // Unique per-connection tag so we can tell apart multiple sockets sharing
+    // the same userId (e.g. tab reload). The player entry records which
+    // connection "owns" it, preventing a stale close handler from removing a
+    // player that a newer connection re-added (which left the new socket
+    // alive but player-less — every subsequent message was then ignored).
+    const connectionId = crypto.randomUUID();
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -141,15 +150,15 @@ export class GameRoomDurableObject implements DurableObject {
 
     this.ctx.acceptWebSocket(server);
 
-    server.serializeAttachment({ userId, username });
+    server.serializeAttachment({ userId, username, connectionId });
 
-    this.addPlayer(userId, username);
+    this.addPlayer(userId, username, connectionId);
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
   webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
     if (!attachment) return;
     const userId = attachment.userId;
 
@@ -243,11 +252,12 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
     if (!attachment) return;
-    const userId = attachment.userId;
-
-    this.removePlayer(userId);
+    // Only remove the player if THIS connection still owns it. A newer
+    // reconnect (same userId) takes over ownership, so a delayed close of the
+    // old socket must not strip the player out from under the live socket.
+    this.removePlayer(attachment.userId, attachment.connectionId);
 
     if (this.state.players.length === 0) {
       this.stopLoops();
@@ -255,13 +265,23 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   webSocketError(ws: WebSocket, error: unknown): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string } | null;
+    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
     if (!attachment) return;
-    const userId = attachment.userId;
-    this.removePlayer(userId);
+    this.removePlayer(attachment.userId, attachment.connectionId);
   }
 
-  addPlayer(id: string, username: string) {
+  addPlayer(id: string, username: string, connectionId: string) {
+    // Safety net: if a previous solo match is stuck in PLAYING with only bots
+    // (human disconnected without the reset path running), reset to LOBBY so a
+    // reconnecting human gets a clean room. Without this the DO stays wedged
+    // in PLAYING indefinitely and START_SOLO is silently ignored.
+    if (this.state.isSoloMode && this.state.phase === "PLAYING") {
+      const anyHuman = this.state.players.some((p) => !p.isBot);
+      if (!anyHuman) {
+        this.resetRoom();
+      }
+    }
+
     const existing = this.state.players.find((p) => p.id === id);
     if (!existing) {
       this.state.players.push({
@@ -275,16 +295,37 @@ export class GameRoomDurableObject implements DurableObject {
         isAlive: true,
         perk: "none",
         extraLifeUsed: false,
+        connId: connectionId,
       });
     } else {
       existing.isAlive = true;
       existing.isReady = false;
+      existing.connId = connectionId;
     }
     this.broadcastState();
   }
 
-  removePlayer(id: string) {
+  removePlayer(id: string, closingConnId?: string) {
+    // Ownership guard: if a newer connection for the same userId now owns the
+    // player entry, ignore this stale close so the live socket keeps its player.
+    const player = this.state.players.find((p) => p.id === id);
+    if (player && closingConnId && player.connId && player.connId !== closingConnId) {
+      return;
+    }
     this.state.players = this.state.players.filter((p) => p.id !== id);
+
+    // Solo mode: if no human players remain, the bot-only match has no
+    // spectator and would run forever — reset the room immediately so the
+    // Durable Object returns to a clean LOBBY for the next connection.
+    if (this.state.isSoloMode) {
+      const humansLeft = this.state.players.some((p) => !p.isBot);
+      if (!humansLeft) {
+        this.resetRoom();
+        this.broadcastState();
+        return;
+      }
+    }
+
     if (this.state.phase === "PLAYING") {
       if (this.state.hunterId === id) {
         this.endGame("animals", "Hunter disconnected!");
