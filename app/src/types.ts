@@ -51,6 +51,11 @@ export interface ClientMessage {
   payload?: any;
 }
 
+export interface StartSoloPayload {
+  role?: "hunter" | "animal" | "random";
+  botCount?: number;
+}
+
 export const ANIMAL_OPTIONS: { value: AnimalType; label: string; emoji: string }[] = [
   { value: "elephant", label: "Elephant", emoji: "🐘" },
   { value: "penguin", label: "Penguin", emoji: "🐧" },

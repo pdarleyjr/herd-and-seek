@@ -65,15 +65,15 @@ export default function App() {
         }
       } else if (data.type === "HIT") {
         const { hit, extraLife, animalType: newAnimalType, targetId, x, y } = data.payload;
-        if (hit) {
-          soundManager.hit();
-          onEvent("Player neutralized!");
-        } else if (extraLife) {
+        if (extraLife) {
           soundManager.perk();
           onEvent(`Extra Life! Respawned as ${newAnimalType}.`);
-          if (targetId === userId && gameState) {
+          if (targetId === userId) {
             localPosRef.current = { x: x ?? localPosRef.current.x, y: y ?? localPosRef.current.y };
           }
+        } else if (hit) {
+          soundManager.hit();
+          onEvent("Player neutralized!");
         } else {
           soundManager.miss();
           onEvent("Hunter missed!");
@@ -85,11 +85,10 @@ export default function App() {
         onEvent(
           `Game Over: ${reason} — ${winner === "hunter" ? "Hunter" : "Animals"} win!`
         );
-        // Ensure all players (including eliminated) see the end screen
         setScreen("GAME");
       }
     },
-    [userId, onEvent]
+    [userId, onEvent, gameState]
   );
 
   const { send, connected } = useGameSocket(userId, username, handleSocketMessage);
@@ -180,10 +179,13 @@ export default function App() {
         onStart={() => {
           // Match starts automatically when all ready — no explicit start needed
         }}
-        onStartSolo={() => {
-          // No role specified — server randomly assigns hunter or animal
-          send({ type: "START_SOLO", payload: {} });
-        }}
+onStartSolo={() => {
+           // No role specified — server randomly assigns hunter or animal
+           send({ type: "START_SOLO", payload: {} });
+         }}
+        onSoloWithBots={(role, botCount) => {
+           send({ type: "START_SOLO", payload: { role, botCount } });
+         }}
       />
     );
   }

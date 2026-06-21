@@ -28,6 +28,7 @@ interface PortraitLobbyProps {
   onReady: () => void;
   onStart: () => void;
   onStartSolo?: () => void;
+  onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
 }
 
 function fmtTime(s: number): string {
@@ -49,8 +50,11 @@ export default function PortraitLobby({
   onReady,
   onStart: _onStart,
   onStartSolo,
+  onSoloWithBots,
 }: PortraitLobbyProps) {
   const [tab, setTab] = useState<Tab>("morphs");
+  const [soloRole, setSoloRole] = useState<"hunter" | "animal" | "random">("random");
+  const [botCount, setBotCount] = useState(4);
 
   const me = gameState?.players.find((p) => p.id === userId);
   const isReady = me?.isReady ?? false;
@@ -282,7 +286,7 @@ export default function PortraitLobby({
         )}
       </div>
 
-      {/* ─── Fixed bottom: Solo + Ready ─────────────────────────────── */}
+      // ─── Fixed bottom: Solo + Ready ───────────────────────────────
       <div
         className="shrink-0 px-4 flex flex-col gap-2"
         style={{
@@ -292,26 +296,63 @@ export default function PortraitLobby({
           borderTop: "2px solid #3d2210",
         }}
       >
-        {/* Play Solo button — shown only when waiting for players */}
+        {/* Bot count selector and role for solo mode */}
         {onStartSolo && playerCount < 2 && (
-          <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              onStartSolo();
-            }}
-            className="w-full rounded-2xl font-extrabold text-base uppercase tracking-wide select-none"
-            style={{
-              minHeight: 52,
-              background: "linear-gradient(180deg,#c8900a,#8a5e06)",
-              border: "2px solid #f5c030",
-              color: "#fff8dc",
-              textShadow: "0 1px 3px rgba(0,0,0,0.5)",
-              boxShadow: "0 0 16px rgba(200,144,10,0.35)",
-              touchAction: "manipulation",
-            }}
-          >
-            🎮 Play Solo vs AI
-          </button>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Bots</span>
+              <span className="text-[#f5d07a] text-sm font-bold">{botCount}</span>
+            </div>
+            <div className="flex gap-1">
+              {[2, 3, 4, 5, 6].map((n) => (
+                <button
+                  key={n}
+                  onPointerDown={(e) => { e.preventDefault(); setBotCount(n); }}
+                  className="flex-1 py-1 rounded-lg text-xs font-bold border select-none"
+                  style={{
+                    borderColor: n === botCount ? "#7fff00" : "#5a3a1a",
+                    background: n === botCount ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
+                    color: n === botCount ? "#7fff00" : "#e8c87a",
+                    touchAction: "manipulation",
+                  }}
+                >{n}</button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {(["hunter", "random", "animal"] as const).map((r) => (
+                <button
+                  key={r}
+                  onPointerDown={(e) => { e.preventDefault(); setSoloRole(r); }}
+                  className="flex-1 py-1 rounded-lg text-xs font-bold border select-none"
+                  style={{
+                    borderColor: r === soloRole ? "#7fff00" : "#5a3a1a",
+                    background: r === soloRole ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
+                    color: r === soloRole ? "#7fff00" : "#e8c87a",
+                    touchAction: "manipulation",
+                  }}
+                >{r === "hunter" ? "🎯 Hunter" : r === "animal" ? "🐾 Animal" : "🎲 Random"}</button>
+              ))}
+            </div>
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
+                else onStartSolo();
+              }}
+              className="w-full rounded-2xl font-extrabold text-base uppercase tracking-wide select-none"
+              style={{
+                minHeight: 52,
+                background: "linear-gradient(180deg,#c8900a,#8a5e06)",
+                border: "2px solid #f5c030",
+                color: "#fff8dc",
+                textShadow: "0 1px 3px rgba(0,0,0,0.5)",
+                boxShadow: "0 0 16px rgba(200,144,10,0.35)",
+                touchAction: "manipulation",
+              }}
+            >
+              🎮 Play Solo vs AI
+            </button>
+          </div>
         )}
 
         {/* Multiplayer Ready button */}

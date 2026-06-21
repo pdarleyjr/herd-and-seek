@@ -7,7 +7,7 @@ import UpgradePanel from "./UpgradePanel";
 import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
 import PortraitLobby from "./PortraitLobby";
-import HowToPlayPanel from "./HowToPlayPanel";
+import HowToPlayModal from "./HowToPlayModal";
 import { useIsPortrait } from "../../hooks/useIsPortrait";
 import type { SerializedState, AnimalType, PerkType } from "../../types";
 
@@ -33,6 +33,7 @@ interface LobbySceneProps {
   onReady: () => void;
   onStart: () => void;
   onStartSolo?: () => void;
+  onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
 }
 
 export default function LobbyScene({
@@ -48,6 +49,7 @@ export default function LobbyScene({
   onReady,
   onStart,
   onStartSolo,
+  onSoloWithBots,
 }: LobbySceneProps) {
   const isPortrait = useIsPortrait();
 
@@ -75,6 +77,7 @@ export default function LobbyScene({
         onReady={onReady}
         onStart={onStart}
         onStartSolo={onStartSolo}
+        onSoloWithBots={onSoloWithBots}
       />
     );
   }
@@ -137,14 +140,10 @@ export default function LobbyScene({
         {/* BOTTOM-LEFT: Player list + solo + how to play */}
         <div className="pointer-events-auto flex flex-col items-start gap-2 justify-end">
           <div className="w-full max-w-[220px]">
-            <HowToPlayPanel collapsed />
+            <HowToPlayModal />
           </div>
           {onStartSolo && playerCount < 2 && (
-            <button
-              onPointerDown={(e) => { e.preventDefault(); onStartSolo(); }}
-              className="w-full max-w-[220px] py-2 rounded-xl font-bold text-sm select-none"
-              style={{ background: "linear-gradient(180deg,#d4a010,#a07808)", border: "2px solid #f5d07a", color: "#000", touchAction: "manipulation" }}
-            >🎮 Play Solo vs AI</button>
+            <SoloBotSelector onStartSolo={onStartSolo} onSoloWithBots={onSoloWithBots} />
           )}
           <PlayerList gameState={gameState} userId={userId} />
         </div>
@@ -368,10 +367,73 @@ function GameModeInfo({
                 </button>
               </div>
             )}
-            <p className="text-[#6b4a2a] text-[10px] mt-1 text-right">30s – 60m allowed</p>
-          </>
+<p className="text-[#6b4a2a] text-[10px] mt-1 text-right">30s – 60m allowed</p>
+           </>
         )}
+       </div>
+     </div>
+   );
+ }
+
+// ── Solo Bot Selector Component ──────────────────────────────────────────────
+function SoloBotSelector({
+  onStartSolo,
+  onSoloWithBots,
+}: {
+  onStartSolo?: () => void;
+  onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
+}) {
+  const [botCount, setBotCount] = useState(4);
+  const [soloRole, setSoloRole] = useState<"hunter" | "animal" | "random">("random");
+
+  return (
+    <div className="w-full max-w-[220px] flex flex-col gap-1">
+      {/* Bot count selector */}
+      <div className="flex items-center justify-between">
+        <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Bots</span>
+        <span className="text-[#f5d07a] text-sm font-bold">{botCount}</span>
       </div>
+      <div className="flex gap-1">
+        {[2, 3, 4, 5, 6].map((n) => (
+          <button
+            key={n}
+            onPointerDown={(e) => { e.preventDefault(); setBotCount(n); }}
+            className="flex-1 py-0.5 rounded-lg text-xs font-bold border select-none"
+            style={{
+              borderColor: n === botCount ? "#7fff00" : "#5a3a1a",
+              background: n === botCount ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
+              color: n === botCount ? "#7fff00" : "#e8c87a",
+              touchAction: "manipulation",
+            }}
+          >{n}</button>
+        ))}
+      </div>
+      {/* Role selector */}
+      <div className="flex gap-1 mt-1">
+        {(["hunter", "random", "animal"] as const).map((r) => (
+          <button
+            key={r}
+            onPointerDown={(e) => { e.preventDefault(); setSoloRole(r); }}
+            className="flex-1 py-0.5 rounded-lg text-xs font-bold border select-none"
+            style={{
+              borderColor: r === soloRole ? "#7fff00" : "#5a3a1a",
+              background: r === soloRole ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
+              color: r === soloRole ? "#7fff00" : "#e8c87a",
+              touchAction: "manipulation",
+            }}
+          >{r === "hunter" ? "🎯 H" : r === "animal" ? "🐾 A" : "🎲 ?"}</button>
+        ))}
+      </div>
+      {/* Play button */}
+      <button
+        onPointerDown={(e) => {
+          e.preventDefault();
+          if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
+          else if (onStartSolo) onStartSolo();
+        }}
+        className="w-full py-1 rounded-xl font-bold text-sm select-none"
+        style={{ background: "linear-gradient(180deg,#d4a010,#a07808)", border: "2px solid #f5d07a", color: "#000", touchAction: "manipulation" }}
+      >🎮 Solo vs AI</button>
     </div>
   );
 }

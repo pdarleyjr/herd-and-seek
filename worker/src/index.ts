@@ -23,6 +23,9 @@ export interface PlayerState {
   botVy?: number;
   botLastDecision?: number;
   botLastShot?: number;
+  botPatrolling?: boolean;   // hunter: true = wandering, false = chasing
+  botPatrolX?: number;      // hunter: current patrol waypoint
+  botPatrolY?: number;
 }
 
 export interface NpcSeed {
@@ -48,9 +51,12 @@ interface RoomState {
 }
 
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
-  payload?: any;
-}
+   type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
+   payload?: {
+     role?: "hunter" | "animal" | "random";
+     botCount?: number;
+   };
+ }
 
 interface ServerMessage {
   type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER" | "DECOY_SPAWN";
@@ -213,11 +219,12 @@ export class GameRoomDurableObject implements DurableObject {
       case "START_SOLO":
         if (this.state.phase === "LOBBY" && !player.isBot) {
           // If no role specified (or "random"), server randomly assigns hunter/animal
-          let role: "hunter" | "animal";
+          let role: "hunter" | "animal" | "random";
           if (parsed.payload?.role === "hunter") role = "hunter";
           else if (parsed.payload?.role === "animal") role = "animal";
-          else role = Math.random() < 0.5 ? "hunter" : "animal";
-          this.startSoloMatch(userId, role);
+          else role = "random";
+          const botCount = parsed.payload?.botCount ?? 4;
+          this.startSoloMatch(userId, role, botCount);
         }
         break;
 
@@ -410,15 +417,11 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
   startSyncLoop() {
     if (this.syncInterval) clearInterval(this.syncInterval);
-    let lastBotTick = 0;
     this.syncInterval = setInterval(() => {
       if (this.state.phase === "PLAYING") {
         const now = Date.now();
-        // Update bots every 50 ms (independent of 30 Hz broadcast)
-        if (this.state.isSoloMode && now - lastBotTick >= 50) {
-          lastBotTick = now;
-          this.updateBots(now);
-        }
+        // Update bots every sync tick so their movement matches NPC speed visually
+        if (this.state.isSoloMode) this.updateBots(now);
         this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() });
       }
     }, 1000 / 30);
@@ -516,7 +519,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
   // ── Solo / Bot system ─────────────────────────────────────────────────────
 
-  startSoloMatch(humanId: string, humanRole: "hunter" | "animal") {
+  startSoloMatch(humanId: string, humanRole: "hunter" | "animal" | "random", botCount: number) {
     if (this.state.phase !== "LOBBY") return;
     const human = this.state.players.find((p) => p.id === humanId);
     if (!human) return;
@@ -526,10 +529,16 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
     const BOT_ANIMAL_TYPES: AnimalType[] = ["elephant", "monkey", "giraffe", "bear", "pig"];
 
-    if (humanRole === "hunter") {
+    // Determine final role: random = 50/50 chance hunter or animal
+    const finalRole = humanRole === "random" 
+      ? (Math.random() < 0.5 ? "hunter" : "animal")
+      : humanRole;
+
+    if (finalRole === "hunter") {
       human.isHunter = true;
-      // Spawn 4 bot animals
-      for (let i = 0; i < 4; i++) {
+      // Spawn bot animals (botCount bots, plus possible bot hunter among them)
+      const animalBots = Math.max(2, botCount - 1);
+      for (let i = 0; i < animalBots; i++) {
         this.state.players.push({
           id: `bot_animal_${i}_${Date.now()}`,
           username: `Animal ${i + 1}`,
@@ -590,8 +599,8 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.state.winner = null;
     this.state.isSoloMode = true;
     this.state.eventLog = [
-      humanRole === "hunter"
-        ? `Solo practice: You are the Hunter. Find the 4 AI animals!`
+      finalRole === "hunter"
+        ? `Solo practice: You are the Hunter. Find the ${animalCount} AI animals!`
         : `Solo practice: You are an Animal. Survive the AI Hunter!`,
     ];
 
@@ -613,15 +622,16 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
   updateBotAnimal(bot: PlayerState, nowMs: number) {
     const lastDecision = bot.botLastDecision ?? 0;
-    // Change direction every 2–4 seconds
-    if (nowMs - lastDecision > 2000 + Math.random() * 2000) {
+    // Mirror NPC behaviour: change direction every 1.5–3.5 seconds, rarely idle
+    if (nowMs - lastDecision > 900 + Math.random() * 2300) {
       bot.botLastDecision = nowMs;
       const angle = Math.random() * Math.PI * 2;
-      const speed = 2.6 + Math.random() * 1.2;
+      // Match NPC client speed (3.2 units/tick at 30 Hz)
+      const speed = 3.0 + Math.random() * 0.6;
       bot.botVx = Math.cos(angle) * speed;
       bot.botVy = Math.sin(angle) * speed;
-      // Occasionally idle (30% chance)
-      if (Math.random() < 0.3) { bot.botVx = 0; bot.botVy = 0; }
+      // Only 10% chance of idle — standing still makes them stand out
+      if (Math.random() < 0.10) { bot.botVx = 0; bot.botVy = 0; }
     }
     const vx = bot.botVx ?? 0;
     const vy = bot.botVy ?? 0;
@@ -632,11 +642,9 @@ endGame(winner: "hunter" | "animals", reason: string) {
   }
 
   updateBotHunter(bot: PlayerState, nowMs: number) {
-    // Find nearest living human animal
     const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive && !p.isBot);
     if (targets.length === 0) return;
 
-    // Simple targeting: pick nearest human
     let nearest = targets[0];
     let nearestDist = Infinity;
     for (const t of targets) {
@@ -644,38 +652,63 @@ endGame(winner: "hunter" | "animals", reason: string) {
       if (d < nearestDist) { nearestDist = d; nearest = t; }
     }
 
-    const dx = nearest.x - bot.x;
-    const dy = nearest.y - bot.y;
-    const dist = Math.hypot(dx, dy);
-
-    // Move toward target at 88% of normal hunter speed
-    const SPEED = 3.2;
-    if (dist > 20) {
-      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (dx / dist) * SPEED));
-      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (dy / dist) * SPEED));
+    // ── Decision: switch between patrol and chase every 3–5 seconds ──────
+    const lastDecision = bot.botLastDecision ?? 0;
+    if (nowMs - lastDecision > 3000 + Math.random() * 2000) {
+      bot.botLastDecision = nowMs;
+      // Medium difficulty: 55% patrol / 45% chase
+      bot.botPatrolling = Math.random() < 0.55;
+      if (bot.botPatrolling) {
+        // Wander toward a random point, biased toward center of map
+        const angle = Math.random() * Math.PI * 2;
+        const range = 300 + Math.random() * 500;
+        bot.botPatrolX = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.cos(angle) * range));
+        bot.botPatrolY = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.sin(angle) * range));
+      }
     }
 
-    // Shoot when within range with 1.8s cooldown — aim at actual player position + noise
+    // ── Movement ─────────────────────────────────────────────────────────
+    const PATROL_SPEED = 1.8; // slow wander (56% of hunter speed)
+    const CHASE_SPEED  = 2.4; // purposeful chase (75% of hunter speed)
+
+    let moveX: number, moveY: number, moveDist: number, speed: number;
+    if (bot.botPatrolling) {
+      const px = bot.botPatrolX ?? WORLD_SIZE / 2;
+      const py = bot.botPatrolY ?? WORLD_SIZE / 2;
+      moveX = px - bot.x; moveY = py - bot.y;
+      moveDist = Math.hypot(moveX, moveY);
+      speed = PATROL_SPEED;
+    } else {
+      moveX = nearest.x - bot.x; moveY = nearest.y - bot.y;
+      moveDist = nearestDist;
+      speed = CHASE_SPEED;
+    }
+
+    if (moveDist > 15) {
+      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (moveX / moveDist) * speed));
+      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed));
+    }
+
+    // ── Shooting — only when chasing AND close ────────────────────────────
+    // Medium difficulty: must be within 260 units, 3s cooldown, large error
+    const SHOOT_RANGE = 260;
     const lastShot = bot.botLastShot ?? 0;
-    const DETECTION_RANGE = 380;
-    if (dist < DETECTION_RANGE && nowMs - lastShot > 1800) {
+    if (!bot.botPatrolling && nearestDist < SHOOT_RANGE && nowMs - lastShot > 3000) {
       bot.botLastShot = nowMs;
-      // Positional error: ±40 world units (beatable but threatening)
-      const errorX = (Math.random() - 0.5) * 80;
-      const errorY = (Math.random() - 0.5) * 80;
-      const targetX = nearest.x + errorX;
-      const targetY = nearest.y + errorY;
-      this.handleBotShoot(targetX, targetY);
+      // ±80 units error each axis — misses ~50% of the time at medium range
+      const errorX = (Math.random() - 0.5) * 160;
+      const errorY = (Math.random() - 0.5) * 160;
+      this.handleBotShoot(nearest.x + errorX, nearest.y + errorY);
     }
   }
 
   handleBotShoot(targetX: number, targetY: number) {
-    // Bot hunter shoots — uses generous collision radius (60) for fair detection
+    // Standard collision radius — same as human hunter, no generous bonus
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
       if (p.isHunter || !p.isAlive || p.isBot) continue;
       const dist = Math.hypot(targetX - p.x, targetY - p.y);
-      if (dist <= PLAYER_COLLISION_RADIUS * 1.8) { hitPlayer = p; break; }
+      if (dist <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; }
     }
 
     if (hitPlayer) {
