@@ -1,8 +1,10 @@
 import { useState } from "react";
 import MorphPanel from "./MorphPanel";
+import LevelSelector from "./LevelSelector";
 import UpgradePanel from "./UpgradePanel";
 import HowToPlayPanel from "./HowToPlayPanel";
-import type { SerializedState, AnimalType, PerkType } from "../../types";
+import type { SerializedState, AnimalType, PerkType, LevelId } from "../../types";
+import { LEVELS, animalsForLevel } from "../../types";
 
 type Tab = "morphs" | "upgrades" | "settings";
 
@@ -22,13 +24,15 @@ interface PortraitLobbyProps {
   connected: boolean;
   selectedAnimal: AnimalType;
   selectedPerk: PerkType;
+  selectedLevel: LevelId;
   onSelectAnimal: (a: AnimalType) => void;
   onSelectPerk: (p: PerkType) => void;
+  onSelectLevel: (l: LevelId) => void;
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
-  onStart: () => void;
   onStartSolo?: () => void;
   onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
+  compact?: boolean;
 }
 
 function fmtTime(s: number): string {
@@ -44,13 +48,15 @@ export default function PortraitLobby({
   connected,
   selectedAnimal,
   selectedPerk,
+  selectedLevel,
   onSelectAnimal,
   onSelectPerk,
+  onSelectLevel,
   onSetDuration,
   onReady,
-  onStart: _onStart,
   onStartSolo,
   onSoloWithBots,
+  compact = false,
 }: PortraitLobbyProps) {
   const [tab, setTab] = useState<Tab>("morphs");
   const [soloRole, setSoloRole] = useState<"hunter" | "animal" | "random">("random");
@@ -62,6 +68,7 @@ export default function PortraitLobby({
   const allReady = playerCount >= 2 && (gameState?.players.every((p) => p.isReady) ?? false);
   const matchDuration = gameState?.matchDuration ?? 120;
   const inGame = gameState?.phase === "PLAYING";
+  const allowedAnimals = animalsForLevel(selectedLevel);
 
   // ── Ready button state ──────────────────────────────────────────────
   const canReady = playerCount >= 2;
@@ -106,8 +113,8 @@ export default function PortraitLobby({
       <div
         className="flex items-center justify-between px-4 shrink-0 border-b border-[#5a3010]"
         style={{
-          paddingTop: "max(10px, env(safe-area-inset-top, 10px))",
-          paddingBottom: 10,
+          paddingTop: `max(${compact ? 6 : 10}px, env(safe-area-inset-top, ${compact ? 6 : 10}px))`,
+          paddingBottom: compact ? 6 : 10,
           background: "rgba(0,0,0,0.5)",
         }}
       >
@@ -160,13 +167,16 @@ export default function PortraitLobby({
                 e.preventDefault();
                 setTab(t);
               }}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 select-none transition-colors"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 select-none transition-colors"
               style={{
                 background: active ? "rgba(127,255,0,0.1)" : "transparent",
                 color: active ? "#7fff00" : "#c8a05a",
+                paddingTop: compact ? 8 : 12,
+                paddingBottom: compact ? 8 : 12,
                 borderBottom: active ? "3px solid #7fff00" : "3px solid transparent",
                 marginBottom: -2,
                 touchAction: "manipulation",
+                minHeight: compact ? 44 : 52,
               }}
             >
               <span className="text-base leading-none">{icons[t]}</span>
@@ -179,8 +189,20 @@ export default function PortraitLobby({
       {/* ─── Tab content (scrollable) ───────────────────────────────── */}
       <div className="flex-1 overflow-y-auto min-h-0" style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         {tab === "morphs" && (
-          <div className="p-3">
-            <MorphPanel selected={selectedAnimal} onSelect={onSelectAnimal} disabled={inGame} />
+          <div className="p-3 flex flex-col gap-3">
+            <LevelSelector
+              selectedLevel={selectedLevel}
+              onSelectLevel={onSelectLevel}
+              disabled={inGame}
+            />
+            <MorphPanel
+              selected={selectedAnimal}
+              onSelect={onSelectAnimal}
+              disabled={inGame}
+              allowedAnimals={allowedAnimals}
+              levelId={selectedLevel}
+              dense={compact}
+            />
           </div>
         )}
 
@@ -273,7 +295,7 @@ export default function PortraitLobby({
                 </div>
                 <div>
                   <div className="text-[#c8a05a] text-[10px] uppercase tracking-wide">Map</div>
-                  <div className="text-[#f5d07a] font-bold">Forrest</div>
+                  <div className="text-[#f5d07a] font-bold">{LEVELS[selectedLevel].displayName}</div>
                 </div>
               </div>
             </Section>

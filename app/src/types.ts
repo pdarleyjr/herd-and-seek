@@ -2,10 +2,78 @@ export type AnimalType =
   | "elephant" | "penguin" | "monkey" | "giraffe"
   | "bear" | "dog" | "frog" | "horse"
   | "pig" | "rabbit" | "cow" | "duck"
-  | "panda" | "parrot" | "owl" | "snake";
+  | "panda" | "parrot" | "owl" | "snake"
+  // Ocean roster (The Deep Dark)
+  | "fish" | "turtle" | "crab" | "octopus"
+  | "jellyfish" | "shark" | "seahorse" | "stingray";
 
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
+
+// ── Level system (shared shape — mirrored manually in worker/src/index.ts) ──
+export type LevelId = "forest" | "deepDark";
+
+export type LevelDefinition = {
+  id: LevelId;
+  displayName: string;
+  subtitle: string;
+  biome: "forest" | "ocean";
+  description: string;
+  hunterSkin: "hunter" | "scuba";
+  mapTheme: "forest" | "ocean";
+  allowedAnimals: AnimalType[];
+};
+
+export const FOREST_ANIMALS: AnimalType[] = [
+  "rabbit", "bear", "owl", "snake",
+  "frog", "duck", "dog", "panda",
+];
+
+export const OCEAN_ANIMALS: AnimalType[] = [
+  "fish", "turtle", "crab", "octopus",
+  "jellyfish", "shark", "seahorse", "stingray",
+];
+
+export const LEVELS: Record<LevelId, LevelDefinition> = {
+  forest: {
+    id: "forest",
+    displayName: "Forest",
+    subtitle: "Hide in trees, grass, rocks, and shadows.",
+    biome: "forest",
+    description: "Classic Herd & Seek: blend into the forest herd and avoid the hunter.",
+    hunterSkin: "hunter",
+    mapTheme: "forest",
+    allowedAnimals: FOREST_ANIMALS,
+  },
+  deepDark: {
+    id: "deepDark",
+    displayName: "The Deep Dark",
+    subtitle: "Dive through seaweed, barrels, boats, and dark currents.",
+    biome: "ocean",
+    description: "An ocean level where sea creatures hide among kelp, barrels, boats, and currents.",
+    hunterSkin: "scuba",
+    mapTheme: "ocean",
+    allowedAnimals: OCEAN_ANIMALS,
+  },
+};
+
+export const LEVEL_ORDER: LevelId[] = ["forest", "deepDark"];
+
+export function isValidLevelId(id: unknown): id is LevelId {
+  return id === "forest" || id === "deepDark";
+}
+
+export function animalsForLevel(levelId: LevelId): AnimalType[] {
+  return LEVELS[levelId].allowedAnimals;
+}
+
+export function isAnimalAllowed(animal: AnimalType, levelId: LevelId): boolean {
+  return LEVELS[levelId].allowedAnimals.includes(animal);
+}
+
+export function defaultAnimalForLevel(levelId: LevelId): AnimalType {
+  return LEVELS[levelId].allowedAnimals[0];
+}
 
 export interface PlayerState {
   id: string;
@@ -19,6 +87,40 @@ export interface PlayerState {
   perk: PerkType;
   extraLifeUsed?: boolean;
   isBot?: boolean; // true for AI-controlled solo practice opponents
+}
+
+export interface ReadyPayload {
+  isReady?: boolean;
+}
+
+export interface SyncPayload {
+  x: number;
+  y: number;
+}
+
+export interface ShootPayload {
+  targetX: number;
+  targetY: number;
+}
+
+export interface SelectAnimalPayload {
+  animalType: AnimalType;
+}
+
+export interface SelectPerkPayload {
+  perk: PerkType;
+}
+
+export interface SelectLevelPayload {
+  levelId: LevelId;
+}
+
+export interface SetDurationPayload {
+  duration: number;
+}
+
+export interface DecoyPayload {
+  readonly [key: string]: never;
 }
 
 export interface NpcSeed {
@@ -39,16 +141,7 @@ export interface SerializedState {
   matchDuration: number;
   winner: "hunter" | "animals" | null;
   eventLog: string[];
-}
-
-export interface ServerMessage {
-  type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER";
-  payload: any;
-}
-
-export interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
-  payload?: any;
+  levelId: LevelId;
 }
 
 export interface StartSoloPayload {
@@ -56,24 +149,50 @@ export interface StartSoloPayload {
   botCount?: number;
 }
 
-export const ANIMAL_OPTIONS: { value: AnimalType; label: string; emoji: string }[] = [
-  { value: "elephant", label: "Elephant", emoji: "🐘" },
-  { value: "penguin", label: "Penguin", emoji: "🐧" },
-  { value: "monkey", label: "Monkey", emoji: "🐵" },
-  { value: "giraffe", label: "Giraffe", emoji: "🦒" },
-  { value: "bear", label: "Bear", emoji: "🐻" },
-  { value: "dog", label: "Dog", emoji: "🐶" },
-  { value: "frog", label: "Frog", emoji: "🐸" },
-  { value: "horse", label: "Horse", emoji: "🐴" },
-  { value: "pig", label: "Pig", emoji: "🐷" },
-  { value: "rabbit", label: "Rabbit", emoji: "🐰" },
-  { value: "cow", label: "Cow", emoji: "🐮" },
-  { value: "duck", label: "Duck", emoji: "🦆" },
-  { value: "panda", label: "Panda", emoji: "🐼" },
-  { value: "parrot", label: "Parrot", emoji: "🦜" },
-  { value: "owl", label: "Owl", emoji: "🦉" },
-  { value: "snake", label: "Snake", emoji: "🐍" },
+export interface AnimalDef {
+  value: AnimalType;
+  label: string;
+  emoji: string;
+  ocean?: boolean;
+  /** Procedural fallback base color used when no PNG sprite exists. */
+  color?: string;
+  description?: string;
+}
+
+export const ANIMAL_OPTIONS: AnimalDef[] = [
+  // Forest
+  { value: "rabbit", label: "Rabbit", emoji: "🐰", color: "#d9c9b0", description: "Small, quick, blends into the herd." },
+  { value: "bear", label: "Bear", emoji: "🐻", color: "#6b4a2a", description: "Larger body; bold but tough to miss." },
+  { value: "owl", label: "Owl", emoji: "🦉", color: "#8a7a5a", description: "Quiet roamer of the trees." },
+  { value: "snake", label: "Snake", emoji: "🐍", color: "#3f8a3a", description: "Low silhouette; great in grass." },
+  { value: "frog", label: "Frog", emoji: "🐸", color: "#4cae4c", description: "Tiny and quick near ponds." },
+  { value: "duck", label: "Duck", emoji: "🦆", color: "#5a6b5a", description: "Waddles near water and reeds." },
+  { value: "dog", label: "Dog", emoji: "🐶", color: "#b07a3a", description: "Sociable herd animal." },
+  { value: "panda", label: "Panda", emoji: "🐼", color: "#e8e8e8", description: "Big and unmistakable — a bold disguise." },
+  // Other forest legacy animals (still loadable in older builds; kept for asset parity)
+  { value: "elephant", label: "Elephant", emoji: "🐘", color: "#b0b0b0" },
+  { value: "penguin", label: "Penguin", emoji: "🐧", color: "#2a2a2a" },
+  { value: "monkey", label: "Monkey", emoji: "🐵", color: "#7a5a3a" },
+  { value: "giraffe", label: "Giraffe", emoji: "🦒", color: "#d8b040" },
+  { value: "horse", label: "Horse", emoji: "🐴", color: "#8a5a2a" },
+  { value: "pig", label: "Pig", emoji: "🐷", color: "#e090a0" },
+  { value: "cow", label: "Cow", emoji: "🐮", color: "#d8d8d0" },
+  { value: "parrot", label: "Parrot", emoji: "🦜", color: "#3aa0d0" },
+  // Ocean (The Deep Dark) — no PNG assets; rendered procedurally.
+  { value: "fish", label: "Fish", emoji: "🐟", ocean: true, color: "#ff8a3c", description: "Small, quick, blends with schools." },
+  { value: "turtle", label: "Turtle", emoji: "🐢", ocean: true, color: "#3f9a4a", description: "Slower, tougher, blends near barrels." },
+  { value: "crab", label: "Crab", emoji: "🦀", ocean: true, color: "#e04030", description: "Sideways scuttle; blends near rocks." },
+  { value: "octopus", label: "Octopus", emoji: "🐙", ocean: true, color: "#7a3aa0", description: "High camouflage; blends near kelp." },
+  { value: "jellyfish", label: "Jellyfish", emoji: "🪼", ocean: true, color: "#ff6fae", description: "Slow drift; blends in currents." },
+  { value: "shark", label: "Shark", emoji: "🦈", ocean: true, color: "#5a7090", description: "Larger decoy — intimidating but obvious." },
+  { value: "seahorse", label: "Seahorse", emoji: "🐡", ocean: true, color: "#f5d030", description: "Small and tricky among kelp." },
+  { value: "stingray", label: "Stingray", emoji: "🌊", ocean: true, color: "#1f6a6a", description: "Flat, blends in dark water." },
 ];
+
+export const ANIMAL_DEFS: Record<AnimalType, AnimalDef> = ANIMAL_OPTIONS.reduce(
+  (acc, a) => { acc[a.value] = a; return acc; },
+  {} as Record<AnimalType, AnimalDef>
+);
 
 export const PERK_OPTIONS: { value: PerkType; label: string; description: string; emoji: string }[] = [
   { value: "none", label: "No Perk", description: "Standard movement, no special ability", emoji: "🚫" },
@@ -121,4 +240,61 @@ export const ALL_ANIMAL_TYPES: AnimalType[] = [
   "bear", "dog", "frog", "horse",
   "pig", "rabbit", "cow", "duck",
   "panda", "parrot", "owl", "snake",
+  "fish", "turtle", "crab", "octopus",
+  "jellyfish", "shark", "seahorse", "stingray",
 ];
+
+export interface SyncStateMessage {
+  type: "SYNC_STATE";
+  payload: SerializedState;
+}
+
+export interface MatchStartMessage {
+  type: "MATCH_START";
+  payload: SerializedState;
+}
+
+export interface HitPayload {
+  targetId: string | null;
+  targetX: number;
+  targetY: number;
+  hit: boolean;
+  extraLife?: boolean;
+  animalType?: AnimalType;
+  x?: number;
+  y?: number;
+}
+
+export interface HitMessage {
+  type: "HIT";
+  payload: HitPayload;
+}
+
+export interface GameOverPayload {
+  winner: "hunter" | "animals";
+  reason: string;
+  state: SerializedState;
+}
+
+export interface GameOverMessage {
+  type: "GAME_OVER";
+  payload: GameOverPayload;
+}
+
+export type ServerMessage =
+  | SyncStateMessage
+  | MatchStartMessage
+  | HitMessage
+  | GameOverMessage;
+
+export type ClientMessage =
+  | { type: "READY"; payload?: ReadyPayload }
+  | { type: "SYNC"; payload: SyncPayload }
+  | { type: "SHOOT"; payload: ShootPayload }
+  | { type: "SELECT_ANIMAL"; payload: SelectAnimalPayload }
+  | { type: "SELECT_PERK"; payload: SelectPerkPayload }
+  | { type: "RESTART" }
+  | { type: "DECOY"; payload?: DecoyPayload }
+  | { type: "SET_DURATION"; payload: SetDurationPayload }
+  | { type: "START_SOLO"; payload: StartSoloPayload }
+  | { type: "SELECT_LEVEL"; payload: SelectLevelPayload };

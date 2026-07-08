@@ -3,6 +3,7 @@ import HomeBackground from "./HomeBackground";
 import HerdSeekTitle from "./HerdSeekTitle";
 import SafariCharacterLayer from "./SafariCharacterLayer";
 import NameEntryCard from "./NameEntryCard";
+import { useViewportInfo } from "../../hooks/useViewportInfo";
 
 interface HomeScreenProps {
   nameInput: string;
@@ -12,6 +13,7 @@ interface HomeScreenProps {
 
 export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeScreenProps) {
   const [error, setError] = useState("");
+  const { isCompact } = useViewportInfo();
 
   const handleSubmit = () => {
     const name = nameInput.trim();
@@ -40,7 +42,7 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
       {/* Layered background: sky, sun, clouds, savanna, ground */}
       <HomeBackground />
 
-      {/* Safari characters: hunter left, tree right, lion right */}
+      {/* Safari characters: hunter left, tree right, rabbit right */}
       <SafariCharacterLayer />
 
       {/* ── Foreground vignette for depth ── */}
@@ -56,7 +58,11 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
       {/* ── UI content: title + name entry ── */}
       <main
         className="relative z-20 flex min-h-dvh flex-col items-center justify-start px-4 pt-[8dvh] pb-[20dvh]"
-        style={{ gap: "clamp(14px, 3dvh, 32px)" }}
+        style={{
+          gap: isCompact ? "clamp(10px, 2dvh, 22px)" : "clamp(14px, 3dvh, 32px)",
+          paddingTop: isCompact ? "clamp(10px, 4dvh, 34px)" : "8dvh",
+          paddingBottom: isCompact ? "clamp(16px, 10dvh, 68px)" : "20dvh",
+        }}
       >
         {/* Game title */}
         <HerdSeekTitle />
@@ -67,7 +73,7 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
           style={{
             color: "rgba(255,255,255,0.92)",
             textShadow: "0 2px 6px rgba(0,0,0,0.6)",
-            fontSize: "clamp(12px, 1.8vw, 17px)",
+            fontSize: isCompact ? "clamp(11px, 1.5vw, 15px)" : "clamp(12px, 1.8vw, 17px)",
             letterSpacing: "0.05em",
           }}
         >
@@ -75,26 +81,26 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
         </p>
 
         {/* Name entry */}
-        <NameEntryCard
-          value={nameInput}
-          onChange={handleChange}
-          onSubmit={handleSubmit}
-          error={error}
-        />
-      </main>
+      <NameEntryCard
+        value={nameInput}
+        onChange={handleChange}
+        onSubmit={handleSubmit}
+        error={error}
+      />
+    </main>
 
       {/* Bottom foreground leaf overlay (decorative) */}
-      <ForegroundLeaves />
+      <ForegroundLeaves compact={isCompact} />
     </section>
   );
 }
 
 // Small foreground leaf clusters at the bottom corners for depth
-function ForegroundLeaves() {
+function ForegroundLeaves({ compact }: { compact: boolean }) {
   return (
     <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-10" aria-hidden="true">
       {/* Bottom-left leaves */}
-      <div className="absolute bottom-0 left-0" style={{ width: "18%", minWidth: 80 }}>
+      <div className="absolute bottom-0 left-0" style={{ width: compact ? "14%" : "18%", minWidth: compact ? 64 : 80 }}>
         <svg viewBox="0 0 160 120" className="w-full h-auto">
           <ellipse cx="30"  cy="120" rx="24" ry="50" fill="#1a6010" transform="rotate(-20 30 120)"/>
           <ellipse cx="60"  cy="120" rx="20" ry="45" fill="#2a7818" transform="rotate(-5 60 120)"/>
@@ -104,7 +110,7 @@ function ForegroundLeaves() {
         </svg>
       </div>
       {/* Bottom-right leaves */}
-      <div className="absolute bottom-0 right-0" style={{ width: "14%", minWidth: 60 }}>
+      <div className="absolute bottom-0 right-0" style={{ width: compact ? "11%" : "14%", minWidth: compact ? 48 : 60 }}>
         <svg viewBox="0 0 130 100" className="w-full h-auto">
           <ellipse cx="100" cy="100" rx="22" ry="44" fill="#1a6010" transform="rotate(18 100 100)"/>
           <ellipse cx="72"  cy="100" rx="18" ry="38" fill="#2a7818" transform="rotate(5 72 100)"/>

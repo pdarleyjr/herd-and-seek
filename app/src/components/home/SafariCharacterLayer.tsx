@@ -1,6 +1,6 @@
 import SvgTree from "../lobby/SvgTree";
 
-// Safari character layer: hunter (left) + tree (right) + lion (right foreground)
+// Character layer: hunter (left), tree (right), and a rabbit hiding in the grass.
 // All absolute-positioned over the background
 export default function SafariCharacterLayer() {
   return (
@@ -34,17 +34,17 @@ export default function SafariCharacterLayer() {
         <HunterSvg />
       </div>
 
-      {/* ── Lion — bottom-right foreground, near tree base ── */}
+      {/* ── Rabbit — bottom-right foreground, tucked near the tree line ── */}
       <div
         className="absolute"
         style={{
-          right: "18%",
-          bottom: "9%",
-          width: "clamp(120px, 16vw, 230px)",
+          right: "17%",
+          bottom: "8%",
+          width: "clamp(120px, 15vw, 220px)",
           filter: "drop-shadow(2px 5px 8px rgba(0,0,0,0.4))",
         }}
       >
-        <LionSvg />
+        <RabbitSvg />
       </div>
     </div>
   );
@@ -161,91 +161,54 @@ function HunterSvg() {
   );
 }
 
-// ── Lion SVG: standing/prowling, facing left toward hunter ──
-function LionSvg() {
+// ── Rabbit SVG: low, alert, and a better thematic fit for hide-and-seek ──
+function RabbitSvg() {
   return (
     <svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg">
       {/* Ground shadow */}
-      <ellipse cx="100" cy="173" rx="75" ry="9" fill="rgba(0,0,0,0.25)" />
+      <ellipse cx="100" cy="170" rx="72" ry="10" fill="rgba(0,0,0,0.22)" />
 
-      {/* Tail (behind body) */}
-      <path
-        d="M170 120 Q192 95 195 108 Q196 118 188 122"
-        stroke="#c8882a"
-        strokeWidth="9"
-        fill="none"
-        strokeLinecap="round"
-        style={{ transformOrigin: "170px 120px", animation: "lionTail 2.8s ease-in-out infinite" }}
-      />
-      {/* Tail tuft */}
-      <ellipse cx="190" cy="112" rx="11" ry="10" fill="#8b5c18" />
+      {/* Back feet */}
+      <ellipse cx="72" cy="153" rx="18" ry="12" fill="#7a6a57" />
+      <ellipse cx="124" cy="153" rx="18" ry="12" fill="#7a6a57" />
 
       {/* Body */}
-      <ellipse cx="108" cy="140" rx="70" ry="38" fill="#e8a030" />
-      {/* Body shading */}
-      <ellipse cx="108" cy="148" rx="60" ry="26" fill="#d09028" opacity="0.5"/>
-      {/* Body highlight */}
-      <ellipse cx="95" cy="128" rx="40" ry="18" fill="#f0b840" opacity="0.4"/>
+      <ellipse cx="100" cy="121" rx="54" ry="34" fill="#e9e3d6" />
+      <ellipse cx="100" cy="126" rx="40" ry="22" fill="#d9d1c5" opacity="0.55" />
 
-      {/* Mane — dark outer ring */}
-      <circle cx="90" cy="98" r="46" fill="#a06820" />
-      {/* Mane — inner ring */}
-      <circle cx="90" cy="98" r="38" fill="#c08030" />
-      {/* Face */}
-      <circle cx="90" cy="95" r="30" fill="#e8a030" />
+      {/* Tail puff */}
+      <g
+        style={{
+          animation: "rabbitTail 1.8s ease-in-out infinite",
+          transformBox: "fill-box",
+          transformOrigin: "center",
+        }}
+      >
+        <circle cx="146" cy="124" r="12" fill="#f7f3ec" />
+        <circle cx="146" cy="124" r="6" fill="#ffffff" opacity="0.9" />
+      </g>
 
-      {/* Ears */}
-      <path d="M65 68 Q58 50 74 62" fill="#e8a030" stroke="#c08030" strokeWidth="2.5"/>
-      <ellipse cx="67" cy="60" rx="6" ry="5" fill="#e8b060" opacity="0.6"/>
-      <path d="M115 68 Q122 50 106 62" fill="#e8a030" stroke="#c08030" strokeWidth="2.5"/>
-      <ellipse cx="113" cy="60" rx="6" ry="5" fill="#e8b060" opacity="0.6"/>
+      {/* Head */}
+      <ellipse cx="75" cy="94" rx="30" ry="26" fill="#f4efe6" />
+      <ellipse cx="64" cy="84" rx="10" ry="16" fill="#efe7db" transform="rotate(-20 64 84)" />
+      <ellipse cx="84" cy="82" rx="10" ry="18" fill="#efe7db" transform="rotate(12 84 82)" />
+      <ellipse cx="64" cy="79" rx="5" ry="10" fill="#d6a2b3" transform="rotate(-20 64 79)" />
+      <ellipse cx="84" cy="77" rx="5" ry="11" fill="#d6a2b3" transform="rotate(12 84 77)" />
 
-      {/* Forehead */}
-      <ellipse cx="88" cy="82" rx="20" ry="12" fill="#f0b840" opacity="0.4"/>
+      {/* Eye and nose */}
+      <circle cx="83" cy="95" r="3.5" fill="#1c1712" />
+      <circle cx="84" cy="94" r="1.1" fill="white" />
+      <path d="M67 104 Q75 110 83 104" stroke="#70503f" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+      <circle cx="64" cy="102" r="4" fill="#c08078" />
 
-      {/* Eyes — amber, alert */}
-      <ellipse cx="76" cy="93" rx="9" ry="8" fill="#f5cc50"/>
-      <ellipse cx="104" cy="93" rx="9" ry="8" fill="#f5cc50"/>
-      <circle  cx="77" cy="94" r="5"   fill="#1a1008"/>
-      <circle  cx="105" cy="94" r="5"   fill="#1a1008"/>
-      {/* Pupils — vertical slit */}
-      <ellipse cx="77" cy="94" rx="2.5" ry="4.5" fill="#050300"/>
-      <ellipse cx="105" cy="94" rx="2.5" ry="4.5" fill="#050300"/>
-      {/* Eye shine */}
-      <circle cx="79" cy="91" r="2"   fill="white" opacity="0.9"/>
-      <circle cx="107" cy="91" r="2"   fill="white" opacity="0.9"/>
+      {/* Forepaws */}
+      <path d="M82 137 Q78 151 80 160" stroke="#7c6e63" strokeWidth="10" fill="none" strokeLinecap="round" />
+      <path d="M110 139 Q116 151 112 160" stroke="#7c6e63" strokeWidth="10" fill="none" strokeLinecap="round" />
 
-      {/* Nose */}
-      <path d="M80 106 Q90 113 100 106 Q90 118 80 106 Z" fill="#c04828"/>
-      <ellipse cx="82" cy="107" rx="4" ry="3" fill="#d05030" opacity="0.6"/>
-
-      {/* Mouth */}
-      <path d="M80 116 Q90 122 100 116" stroke="#a03820" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-      <path d="M90 116 L90 120" stroke="#a03820" strokeWidth="2" fill="none" strokeLinecap="round"/>
-
-      {/* Whisker dots */}
-      <circle cx="67" cy="112" r="2.5" fill="#b07830" opacity="0.7"/>
-      <circle cx="61" cy="107" r="2"   fill="#b07830" opacity="0.6"/>
-      <circle cx="113" cy="112" r="2.5" fill="#b07830" opacity="0.7"/>
-      <circle cx="119" cy="107" r="2"   fill="#b07830" opacity="0.6"/>
-
-      {/* Front legs */}
-      <rect x="52"  y="155" width="22" height="26" rx="11" fill="#d09028"/>
-      <rect x="82"  y="158" width="22" height="24" rx="11" fill="#d09028"/>
-      {/* Back legs (partially behind body) */}
-      <rect x="118" y="152" width="22" height="26" rx="11" fill="#c88020"/>
-      <rect x="146" y="150" width="20" height="28" rx="10" fill="#c88020"/>
-
-      {/* Paws */}
-      <ellipse cx="62"  cy="178" rx="14" ry="7"  fill="#b87820"/>
-      <ellipse cx="92"  cy="179" rx="13" ry="6.5" fill="#b87820"/>
-      <ellipse cx="128" cy="175" rx="13" ry="7"  fill="#a86818"/>
-      <ellipse cx="155" cy="174" rx="12" ry="7"  fill="#a86818"/>
-
-      {/* Claw marks on front paws */}
-      <path d="M56 180 Q54 185 53 188" stroke="#8a5c10" strokeWidth="1.5" fill="none"/>
-      <path d="M62 181 Q62 186 61 189" stroke="#8a5c10" strokeWidth="1.5" fill="none"/>
-      <path d="M68 180 Q70 185 71 188" stroke="#8a5c10" strokeWidth="1.5" fill="none"/>
+      {/* Ear shadows / whiskers */}
+      <path d="M52 100 L34 94" stroke="#b79f8d" strokeWidth="2" strokeLinecap="round" />
+      <path d="M52 106 L32 106" stroke="#b79f8d" strokeWidth="2" strokeLinecap="round" />
+      <path d="M52 112 L34 118" stroke="#b79f8d" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

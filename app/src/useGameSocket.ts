@@ -1,12 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import type { ClientMessage } from "./types";
+import type { ClientMessage, ServerMessage } from "./types";
 
 const WS_URL = "wss://herd-and-seek-backend.pdarleyjr.workers.dev";
 
 export function useGameSocket(
   userId: string,
   username: string,
-  onMessage: (data: any) => void
+  onMessage: (data: ServerMessage) => void
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -41,7 +41,7 @@ export function useGameSocket(
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(event.data) as ServerMessage;
           onMessageRef.current(data);
         } catch {
           // ignore parse errors

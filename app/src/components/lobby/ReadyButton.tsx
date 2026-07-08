@@ -4,7 +4,6 @@ interface ReadyButtonProps {
   allReady: boolean;
   playerCount: number;
   onReady: () => void;
-  onStart: () => void;
   isHost?: boolean;
 }
 

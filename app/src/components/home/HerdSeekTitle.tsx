@@ -1,5 +1,6 @@
 // Bubbly game-font title using CSS text-stroke + layered shadows
 // No custom font needed — uses "Arial Black" / system heavy weight
+import { useViewportInfo } from "../../hooks/useViewportInfo";
 
 const WORD_STYLE: React.CSSProperties = {
   fontFamily: '"Arial Black", "Helvetica Neue", Impact, "Trebuchet MS", sans-serif',
@@ -31,6 +32,11 @@ const AMP_STYLE: React.CSSProperties = {
 };
 
 export default function HerdSeekTitle() {
+  const { isCompact } = useViewportInfo();
+
+  const wordSize = isCompact ? "clamp(40px, 8vw, 92px)" : "clamp(52px, 11vw, 124px)";
+  const ampSize = isCompact ? "clamp(28px, 5vw, 60px)" : "clamp(34px, 7vw, 78px)";
+
   return (
     <div
       className="home-animated relative flex flex-col items-center select-none"
@@ -38,10 +44,10 @@ export default function HerdSeekTitle() {
     >
       {/* Decorative leaf clusters flanking the title */}
       <div className="absolute -left-8 top-2 opacity-80" style={{ animation: "leafBob 4s ease-in-out infinite" }}>
-        <LeafCluster flip={false} />
+        <LeafCluster flip={false} compact={isCompact} />
       </div>
       <div className="absolute -right-8 top-2 opacity-80" style={{ animation: "leafBob 4s ease-in-out 0.5s infinite" }}>
-        <LeafCluster flip />
+        <LeafCluster flip compact={isCompact} />
       </div>
 
       {/* Backing badge — warm wooden plank */}
@@ -67,12 +73,15 @@ export default function HerdSeekTitle() {
       {/* Title text — stacked: HERD / & / SEEK */}
       <h1
         aria-label="Herd and Seek"
-        className="relative z-10 flex flex-col items-center px-8 py-4"
+        className="relative z-10 flex flex-col items-center"
+        style={{
+          padding: isCompact ? "8px 24px" : "16px 32px",
+        }}
       >
         <span
           style={{
             ...WORD_STYLE,
-            fontSize: "clamp(52px, 11vw, 124px)",
+            fontSize: wordSize,
           }}
         >
           HERD
@@ -80,7 +89,7 @@ export default function HerdSeekTitle() {
         <span
           style={{
             ...AMP_STYLE,
-            fontSize: "clamp(34px, 7vw, 78px)",
+            fontSize: ampSize,
           }}
         >
           &amp;
@@ -88,7 +97,7 @@ export default function HerdSeekTitle() {
         <span
           style={{
             ...WORD_STYLE,
-            fontSize: "clamp(52px, 11vw, 124px)",
+            fontSize: wordSize,
           }}
         >
           SEEK
@@ -98,12 +107,12 @@ export default function HerdSeekTitle() {
   );
 }
 
-function LeafCluster({ flip }: { flip: boolean }) {
+function LeafCluster({ flip, compact }: { flip: boolean; compact: boolean }) {
   return (
     <svg
       viewBox="0 0 60 80"
-      width={52}
-      height={72}
+      width={compact ? 42 : 52}
+      height={compact ? 58 : 72}
       style={{ transform: flip ? "scaleX(-1)" : "none" }}
       xmlns="http://www.w3.org/2000/svg"
     >

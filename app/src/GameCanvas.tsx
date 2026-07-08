@@ -1,15 +1,28 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { type AssetMap } from "./AssetLoader";
+import { useViewportInfo } from "./hooks/useViewportInfo";
 import {
   type SerializedState,
   type AnimalType,
   type PerkType,
   type ClientMessage,
+  type LevelId,
   WORLD_SIZE,
   ANIMAL_SPEED,
   HUNTER_SPEED,
+  PLAYER_RENDER_RADIUS,
 } from "./types";
 import { soundManager } from "./SoundManager";
+import {
+  drawOceanAnimal,
+  drawScubaHunter,
+  drawOceanBackground,
+  drawOceanObject,
+  generateOceanEnvironment,
+  isPointInCover,
+  type OceanEnvironment,
+  type ForestEntityRefs,
+} from "./game/levelRenderer";
 
 interface NpcEntity {
   id: number;
@@ -100,8 +113,10 @@ interface GameCanvasProps {
 function getAnimalImage(
   assets: AssetMap,
   type: AnimalType
-): HTMLImageElement {
-  return assets[type] || assets.elephant;
+): HTMLImageElement | null {
+  // Only forest animals have PNG sprites. Ocean animals are drawn procedurally.
+  const img = (assets as unknown as Record<string, HTMLImageElement | undefined>)[type];
+  return img ?? null;
 }
 
 function generateTrees(): TreeEntity[] {
@@ -188,6 +203,8 @@ export default function GameCanvas({
   const treesRef = useRef<TreeEntity[]>([]);
   const rocksRef = useRef<RockEntity[]>([]);
   const grassPatchesRef = useRef<GrassPatch[]>([]);
+  const oceanRef = useRef<OceanEnvironment | null>(null);
+  const levelRef = useRef<LevelId>("forest");
   const decoysRef = useRef<DecoyEntity[]>([]);
   const serverStateRef = useRef<SerializedState | null>(null);
   const gameTickRef = useRef(0);
@@ -210,15 +227,26 @@ export default function GameCanvas({
   const remoteRenderRef = useRef<Map<string, { renderX: number; renderY: number; targetX: number; targetY: number }>>(new Map());
   const movePointerIdRef = useRef<number | null>(null);
   const aimPointerIdRef = useRef<number | null>(null);
+  // Track the pointer type of the most recent pointerdown so the synthesized
+  // "click" event can be ignored on touch (which would otherwise cause an
+  // accidental shot every time you tap-aim the right side).
+  const lastPointerTypeRef = useRef<"mouse" | "touch" | "pen">("mouse");
   // Track aim touch start for tap-vs-drag detection
   const aimTapStartTimeRef = useRef(0);
   const aimTapStartXRef = useRef(0);
   const aimTapStartYRef = useRef(0);
   // World-space position of current aim target (used for crosshair rendering)
   const aimTargetRef = useRef<{ worldX: number; worldY: number } | null>(null);
+  // Mobile aim-assist: the player id the shot is currently being nudged toward.
+  const assistTargetIdRef = useRef<string | null>(null);
+  // Ref to the FIRE button so the canvas click handler can avoid firing when
+  // the click actually landed on the button (avoids phantom desktop shots).
+  const fireButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [isMobile] = useState(() => isTouchDevice());
+  const viewport = useViewportInfo();
   const lastTimeRef = useRef(0);
+  const lastFireStampRef = useRef(0);
 
   const aimRef = useRef<{
     active: boolean;
@@ -261,9 +289,10 @@ export default function GameCanvas({
   useEffect(() => {
     if (!gameState) return;
     serverStateRef.current = gameState;
+    levelRef.current = (gameState.levelId ?? "forest") as LevelId;
 
-if (gameState.npcSeeds.length > 0 && npcsRef.current.length === 0) {
-       npcsRef.current = gameState.npcSeeds.map((seed) => ({
+    if (gameState.npcSeeds.length > 0 && npcsRef.current.length === 0) {
+      npcsRef.current = gameState.npcSeeds.map((seed) => ({
          ...seed,
          vx: 0,
          vy: 0,
@@ -283,9 +312,31 @@ if (gameState.npcSeeds.length > 0 && npcsRef.current.length === 0) {
           };
         }
       }
-      treesRef.current = generateTrees();
-      rocksRef.current = generateRocks();
-      grassPatchesRef.current = generateGrassPatches();
+      const seed = gameState.npcSeeds.length + Math.floor(Math.random() * 1e6);
+      const lvl: LevelId = (gameState.levelId ?? "forest") as LevelId;
+      levelRef.current = lvl;
+      if (lvl === "deepDark") {
+        // Clear the forest environment so nothing stray renders.
+        treesRef.current = [];
+        rocksRef.current = [];
+        grassPatchesRef.current = [];
+        const rnd = (() => {
+          let a = (seed | 0) >>> 0;
+          return () => {
+            a = (a + 0x9e3779b9) | 0;
+            let t = Math.imul(a ^ (a >>> 16), 2246822507);
+            t = Math.imul(t ^ (t >>> 13), 3266489917);
+            return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
+          };
+        })();
+        oceanRef.current = generateOceanEnvironment(rnd);
+      } else {
+        levelRef.current = "forest";
+        treesRef.current = generateTrees();
+        rocksRef.current = generateRocks();
+        grassPatchesRef.current = generateGrassPatches();
+        oceanRef.current = null;
+      }
       soundManager.gameStart();
     }
 
@@ -316,59 +367,64 @@ if (gameState.npcSeeds.length > 0 && npcsRef.current.length === 0) {
         }
       }
     }
-  }, [gameState, userId]);
+  }, [gameState, localPosRef, userId]);
 
   const spawnAmbientParticle = useCallback(() => {
-    if (ambientParticlesRef.current.length > 15) return;
+    if (ambientParticlesRef.current.length > 18) return;
     const cam = cameraRef.current;
     const w = canvasSizeRef.current.w;
     const h = canvasSizeRef.current.h;
+    const ocean = levelRef.current === "deepDark";
     ambientParticlesRef.current.push({
       x: cam.x + Math.random() * w,
-      y: cam.y + Math.random() * h,
+      y: cam.y + Math.random() * (ocean ? h : h),
       vx: (Math.random() - 0.5) * 0.3,
-      vy: -0.2 - Math.random() * 0.3,
+      vy: -0.2 - Math.random() * 0.35,
       life: 120 + Math.random() * 60,
       maxLife: 180,
-      size: 2 + Math.random() * 3,
-      color: Math.random() < 0.5 ? "rgba(255,255,200,0.3)" : "rgba(150,255,150,0.3)",
+      size: ocean ? 2 + Math.random() * 2.5 : 2 + Math.random() * 3,
+      color: ocean
+        ? (Math.random() < 0.5 ? "rgba(220,245,255,0.4)" : "rgba(120,220,230,0.35)")
+        : (Math.random() < 0.5 ? "rgba(255,255,200,0.3)" : "rgba(150,255,150,0.3)"),
     });
   }, []);
 
   const updateNpcs = useCallback(() => {
-    const npcs = npcsRef.current;
-    for (const npc of npcs) {
-      npc.stateTimer++;
+    npcsRef.current = npcsRef.current.map((npc) => {
+      const next: NpcEntity = { ...npc };
+      next.stateTimer += 1;
 
-      if (npc.stateTimer >= npc.stateDuration) {
-        npc.state = Math.random() < 0.7 ? "WANDER" : "IDLE";
-        npc.stateTimer = 0;
-        npc.stateDuration = 90 + Math.floor(Math.random() * 180);
+      if (next.stateTimer >= next.stateDuration) {
+        next.state = Math.random() < 0.7 ? "WANDER" : "IDLE";
+        next.stateTimer = 0;
+        next.stateDuration = 90 + Math.floor(Math.random() * 180);
 
-        if (npc.state === "WANDER") {
+        if (next.state === "WANDER") {
           const angle = Math.random() * Math.PI * 2;
-          npc.vx = Math.cos(angle) * ANIMAL_SPEED;
-          npc.vy = Math.sin(angle) * ANIMAL_SPEED;
+          next.vx = Math.cos(angle) * ANIMAL_SPEED;
+          next.vy = Math.sin(angle) * ANIMAL_SPEED;
         } else {
-          npc.vx = 0;
-          npc.vy = 0;
+          next.vx = 0;
+          next.vy = 0;
         }
       }
 
-      if (npc.state === "WANDER") {
-        npc.x += npc.vx;
-        npc.y += npc.vy;
+      if (next.state === "WANDER") {
+        next.x += next.vx;
+        next.y += next.vy;
 
-        if (npc.x <= 48 || npc.x >= WORLD_SIZE - 48) {
-          npc.vx = -npc.vx;
-          npc.x = Math.max(48, Math.min(WORLD_SIZE - 48, npc.x));
+        if (next.x <= 48 || next.x >= WORLD_SIZE - 48) {
+          next.vx = -next.vx;
+          next.x = Math.max(48, Math.min(WORLD_SIZE - 48, next.x));
         }
-        if (npc.y <= 48 || npc.y >= WORLD_SIZE - 48) {
-          npc.vy = -npc.vy;
-          npc.y = Math.max(48, Math.min(WORLD_SIZE - 48, npc.y));
+        if (next.y <= 48 || next.y >= WORLD_SIZE - 48) {
+          next.vy = -next.vy;
+          next.y = Math.max(48, Math.min(WORLD_SIZE - 48, next.y));
         }
       }
-    }
+
+      return next;
+    });
 
     for (let i = decoysRef.current.length - 1; i >= 0; i--) {
       const d = decoysRef.current[i];
@@ -508,14 +564,15 @@ const updateLocalPlayer = useCallback(() => {
     const { w, h } = canvasSizeRef.current;
     ctx.clearRect(0, 0, w, h);
 
-    // ── Rich forest terrain base ────────────────────────────────────────────
-    ctx.fillStyle = "#3d7a25"; // darker, denser forest green
-    ctx.fillRect(0, 0, w, h);
-
     const state = serverStateRef.current;
     if (!state) return;
 
+    const lvl: LevelId = levelRef.current;
+    const isOcean = lvl === "deepDark";
+    const time = performance.now();
+
     const me = state.players.find((p) => p.id === userId);
+    const isHunter = me?.isHunter ?? false;
     if (me && me.isAlive) {
       cameraRef.current.x = localPosRef.current.x - w / 2;
       cameraRef.current.y = localPosRef.current.y - h / 2;
@@ -537,11 +594,24 @@ const updateLocalPlayer = useCallback(() => {
       rp.renderY += (rp.targetY - rp.renderY) * 0.18;
     }
 
-    ctx.strokeStyle = "#1a3c0a";
-    ctx.lineWidth = 12;
-    ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+    if (isOcean) {
+      // Ocean level: animated water base + waved/current lanes (grid drawn inside).
+      drawOceanBackground(ctx, camX, camY, w, h, time);
+      // World boundary for the ocean
+      ctx.strokeStyle = "rgba(120,200,255,0.25)";
+      ctx.lineWidth = 12;
+      ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+    } else {
+      // ── Rich forest terrain base ────────────────────────────────────────────
+      ctx.fillStyle = "#3d7a25";
+      ctx.fillRect(0, 0, w, h);
 
-    // ── Terrain variation patches (world-coord, deterministic) ─────────────
+      ctx.strokeStyle = "#1a3c0a";
+      ctx.lineWidth = 12;
+      ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+    }
+
+    if (!isOcean) {
     const PATCH_GRID = 160;
     const patchStartX = Math.floor(camX / PATCH_GRID) * PATCH_GRID;
     const patchStartY = Math.floor(camY / PATCH_GRID) * PATCH_GRID;
@@ -612,6 +682,7 @@ const updateLocalPlayer = useCallback(() => {
         ctx.fill();
       }
     }
+    } // end forest terrain/grid/grass
 
     for (const p of ambientParticlesRef.current) {
       const alpha = (p.life / p.maxLife) * 0.4;
@@ -642,28 +713,44 @@ const updateLocalPlayer = useCallback(() => {
       perkStateRef.current.type === "camouflage" &&
       Date.now() < perkStateRef.current.activeUntil;
 
+    // Resolve an animal's visual: PNG sprite (forest) or procedural drawFn (ocean).
+    const animalSprite = (type: AnimalType, vx: number): {
+      img?: HTMLImageElement;
+      drawFn?: (sx: number, sy: number) => void;
+      flipX?: boolean;
+    } => {
+      const img = getAnimalImage(assets, type);
+      if (img) return { img, flipX: vx < -0.1 };
+      return {
+        drawFn: (sx, sy) => drawOceanAnimal(ctx, type, sx, sy, 64, vx),
+      };
+    };
+
     for (const npc of npcsRef.current) {
+      const sp = animalSprite(npc.animalType, npc.vx);
       renderArray.push({
         x: npc.x,
         y: npc.y,
-        img: getAnimalImage(assets, npc.animalType),
+        img: sp.img,
+        drawFn: sp.drawFn,
         rotation: 0,
         size: 64,
         isEntity: true,
         shadow: true,
         alpha: 1,
         glow: null,
-        flipX: npc.vx < -0.1, // mirror when moving left
+        flipX: sp.flipX, // mirror when moving left (PNG sprites only)
       });
     }
 
     for (const d of decoysRef.current) {
       const alpha = Math.min(1, d.life / 30);
+      const sp = animalSprite(d.animalType, 0);
       renderArray.push({
         x: d.x,
         y: d.y,
-        img: getAnimalImage(assets, d.animalType),
-        
+        img: sp.img,
+        drawFn: sp.drawFn,
         rotation: 0,
         size: 64,
         isEntity: true,
@@ -675,20 +762,36 @@ const updateLocalPlayer = useCallback(() => {
 
     for (const p of state.players) {
       if (!p.isAlive) continue;
-      const img = p.isHunter
-        ? assets.hunter
-        : getAnimalImage(assets, p.animalType);
       const isLocal = p.id === userId;
       const remoteRender = !isLocal ? remoteRenderRef.current.get(p.id) : null;
       const px = isLocal ? localPosRef.current.x : (remoteRender?.renderX ?? p.x);
       const py = isLocal ? localPosRef.current.y : (remoteRender?.renderY ?? p.y);
 
-let rotation = 0;
-       let alpha = 1;
-       let glow: string | null = null;
+      // Pick the visual. Ocean hunter → scuba diver; ocean animals → procedural.
+      let img: HTMLImageElement | undefined;
+      let drawFn: ((sx: number, sy: number) => void) | undefined;
+      let rotation = 0;
+      let alpha = 1;
+      let glow: string | null = null;
+      let shadow = true;
 
       if (p.isHunter) {
         rotation = hunterAngleRef.current;
+        if (isOcean) {
+          const moving = isLocal
+            ? joystickRef.current.active ||
+              Object.values(keysRef.current).some(Boolean)
+            : false;
+          drawFn = (sx, sy) =>
+            drawScubaHunter(ctx, sx, sy, aimAngleRef.current, moving, 64, time);
+          shadow = false; // scuba drawFn paints its own shadow
+        } else {
+          img = assets.hunter;
+        }
+      } else {
+        const sp = animalSprite(p.animalType, 0);
+        img = sp.img;
+        drawFn = sp.drawFn;
       }
 
       if (isLocal && isCamouflaged) {
@@ -708,10 +811,11 @@ renderArray.push({
          x: px,
          y: py,
          img,
+         drawFn,
          rotation,
          size: 64,
          isEntity: true,
-         shadow: true,
+         shadow,
          alpha,
          glow,
        });
@@ -764,6 +868,23 @@ const img =
           ctx.fill();
         },
       });
+    }
+
+    // ── Ocean environment objects (boots, barrels, reef, kelp, seaweed) ──
+    if (isOcean && oceanRef.current) {
+      for (const o of oceanRef.current.objects) {
+        renderArray.push({
+          x: o.x,
+          y: o.y,
+          rotation: 0,
+          size: o.size,
+          isEntity: false,
+          shadow: o.kind === "boat" || o.kind === "barrel",
+          alpha: 1,
+          glow: null,
+          drawFn: (sx: number, sy: number) => drawOceanObject(ctx, o, sx, sy, time),
+        });
+      }
     }
 
     renderArray.sort((a, b) => a.y - b.y);
@@ -853,7 +974,7 @@ for (const item of renderArray) {
       ctx.setLineDash([]);
     }
 
-if (me && me.isAlive && me.isHunter) {
+    if (me && me.isAlive && isHunter) {
       const screenX = localPosRef.current.x - camX;
       const screenY = localPosRef.current.y - camY;
       ctx.fillStyle = "rgba(0,0,0,0.7)";
@@ -941,6 +1062,22 @@ if (me && me.isAlive && me.isHunter) {
       const my = CY + (r.y / WORLD_SIZE) * CS;
       ctx.fillStyle = "rgba(100,90,80,0.4)";
       ctx.fillRect(mx - 0.5, my - 0.5, 1.5, 1.5);
+    }
+
+    // Ocean environment dots (boats/reef/kelp) on the radar map
+    if (isOcean && oceanRef.current) {
+      for (const o of oceanRef.current.objects) {
+        const mx = CX + (o.x / WORLD_SIZE) * CS;
+        const my = CY + (o.y / WORLD_SIZE) * CS;
+        let color = "rgba(100,200,160,0.5)";
+        if (o.kind === "boat") color = "rgba(180,140,80,0.7)";
+        else if (o.kind === "barrel") color = "rgba(160,120,60,0.5)";
+        else if (o.kind === "reef") color = "rgba(120,160,170,0.5)";
+        else if (o.kind === "kelp" || o.kind === "seaweed") color = "rgba(40,150,60,0.5)";
+        ctx.fillStyle = color;
+        const s = o.kind === "boat" ? 2 : 1.5;
+        ctx.fillRect(mx - s / 2, my - s / 2, s, s);
+      }
     }
 
     if (isHunterLocal) {
@@ -1157,6 +1294,32 @@ if (me && me.isAlive && me.isHunter) {
       ctx.moveTo(mx, my - 14);
       ctx.lineTo(mx, my + 14);
       ctx.stroke();
+
+      // Aim-assist indicator (mobile/tablet only): soft ring on the target
+      // the shot is being nudged toward, plus a faint magnetism line.
+      if (isMobile && assistTargetIdRef.current) {
+        const t = state.players.find(
+          (p) => p.id === assistTargetIdRef.current && p.isAlive && !p.isHunter,
+        );
+        if (t) {
+          const tx = t.x - camX;
+          const ty = t.y - camY;
+          ctx.save();
+          ctx.strokeStyle = "rgba(120, 220, 255, 0.55)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 6]);
+          ctx.beginPath();
+          ctx.arc(tx, ty, PLAYER_RENDER_RADIUS + 6 + pulse, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = "rgba(120, 220, 255, 0.25)";
+          ctx.beginPath();
+          ctx.moveTo(hunterSX, hunterSY);
+          ctx.lineTo(tx, ty);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
     }
 
     if (state.phase === "PLAYING") {
@@ -1215,48 +1378,42 @@ if (me && me.isAlive && me.isHunter) {
     if (me && !me.isHunter && me.isAlive && state.phase === "PLAYING") {
       const px = localPosRef.current.x;
       const py = localPosRef.current.y;
-      const COVER_RADIUS = 42; // world units — must be inside the patch
-      const inCover = grassPatchesRef.current.some((patch) => {
-        if (!patch.tall) return false;
-        const d = Math.hypot(px - patch.x, py - patch.y);
-        return d < patch.spread + COVER_RADIUS;
-      });
+      const oceanEnv = isOcean ? oceanRef.current : null;
+      const inCover = isPointInCover(
+        lvl, px, py,
+        isOcean ? null : ({ grassPatches: grassPatchesRef.current } as ForestEntityRefs),
+        oceanEnv,
+      );
 
       if (inCover) {
         const screenX = px - camX;
         const screenY = py - camY;
-        // Green glow around player
+        const ocean = isOcean;
+        // Glow tint matches the biome (green on land, teal in the deep)
         const coverGrd = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, 44);
-        coverGrd.addColorStop(0, "rgba(60,200,40,0.28)");
-        coverGrd.addColorStop(1, "rgba(60,200,40,0)");
+        coverGrd.addColorStop(0, ocean ? "rgba(40,160,200,0.30)" : "rgba(60,200,40,0.28)");
+        coverGrd.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = coverGrd;
         ctx.beginPath();
         ctx.arc(screenX, screenY, 44, 0, Math.PI * 2);
         ctx.fill();
-        // "HIDDEN" badge
-        ctx.fillStyle = "rgba(20,90,10,0.85)";
+        // Badge
+        ctx.fillStyle = ocean ? "rgba(10,60,80,0.88)" : "rgba(20,90,10,0.85)";
         ctx.beginPath();
-        ctx.roundRect(screenX - 34, screenY - 68, 68, 18, 5);
+        ctx.roundRect(screenX - 40, screenY - 68, 80, 18, 5);
         ctx.fill();
-        ctx.fillStyle = "#7fff00";
+        ctx.fillStyle = ocean ? "#39d6e6" : "#7fff00";
         ctx.font = "bold 10px system-ui";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("🌿 HIDDEN", screenX, screenY - 59);
+        ctx.fillText(ocean ? "🪸 CONCEALED" : "🌿 HIDDEN", screenX, screenY - 59);
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
       }
     }
 
     gameTickRef.current++;
-  }, [assets, userId, localPosRef, username]);
-
-  const gameLoop = useCallback(() => {
-    updateNpcs();
-    updateLocalPlayer();
-    render();
-    rafRef.current = requestAnimationFrame(gameLoop);
-  }, [updateNpcs, updateLocalPlayer, render]);
+  }, [assets, userId, localPosRef, username, isMobile]);
 
   const activatePerk = useCallback(() => {
     const state = serverStateRef.current;
@@ -1300,8 +1457,14 @@ decoysRef.current.push({
   // Shoot at the current aim world position (crosshair / mouse / drag target).
   // Server does a point-vs-player check — target must be near an actual player.
   const fireShot = useCallback(() => {
+    const now = performance.now();
+    if (now - lastFireStampRef.current < 120) return;
+    lastFireStampRef.current = now;
+
     const state = serverStateRef.current;
     if (!state || state.phase !== "PLAYING") return;
+    if (state.ammo <= 0) return;
+
     const me = state.players.find((p) => p.id === userId);
     if (!me || !me.isHunter || !me.isAlive) return;
 
@@ -1324,6 +1487,55 @@ decoysRef.current.push({
       tY = localPosRef.current.y + Math.sin(a) * 600;
     }
 
+    // ── Mobile / tablet aim assist (never active on desktop) ─────────────
+    // Softly nudges the shot toward the nearest valid animal inside a narrow
+    // cone. It never hard-locks and is weakened when the target is concealed.
+    if (isMobile) {
+      const lvl = levelRef.current;
+      const hx = localPosRef.current.x;
+      const hy = localPosRef.current.y;
+      const rawAngle = Math.atan2(tY - hy, tX - hx);
+      const tablet = Math.min(canvasSizeRef.current.w, canvasSizeRef.current.h) >= 600;
+      const cone = tablet ? 10 : 14; // degrees
+      const range = 520;
+      let bestId: string | null = null;
+      let bestDelta = Infinity;
+      let bestAngle = rawAngle;
+      let bestDist = 600;
+      for (const cand of state.players) {
+        if (cand.isHunter || !cand.isAlive || cand.id === userId) continue;
+        const cdx = cand.x - hx;
+        const cdy = cand.y - hy;
+        const dist = Math.hypot(cdx, cdy);
+        if (dist > range || dist < 1) continue;
+        const candAngle = Math.atan2(cdy, cdx);
+        let delta = candAngle - rawAngle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        const absDelta = Math.abs(delta);
+        if (absDelta < (cone * Math.PI) / 180 && absDelta < bestDelta) {
+          // Reduce assist when target is hidden in cover.
+          const concealed = isPointInCover(
+            lvl, cand.x, cand.y,
+            lvl === "forest" ? ({ grassPatches: grassPatchesRef.current } as ForestEntityRefs) : null,
+            lvl === "deepDark" ? oceanRef.current : null,
+          );
+          const strength = concealed ? 0.12 : 0.35;
+          bestDelta = absDelta;
+          bestAngle = rawAngle + delta * strength;
+          bestDist = dist;
+          bestId = cand.id;
+        }
+      }
+      if (bestId) {
+        tX = hx + Math.cos(bestAngle) * Math.max(120, bestDist);
+        tY = hy + Math.sin(bestAngle) * Math.max(120, bestDist);
+        assistTargetIdRef.current = bestId;
+      } else {
+        assistTargetIdRef.current = null;
+      }
+    }
+
     // Keep aim angle consistent with shot direction
     const dx = tX - localPosRef.current.x;
     const dy = tY - localPosRef.current.y;
@@ -1338,9 +1550,9 @@ decoysRef.current.push({
     muzzleFlashesRef.current.push({ x: muzzle.x, y: muzzle.y, life: 8 });
     hitMarkersRef.current.push({ x: tX, y: tY, life: 30, hit: false });
 
-    soundManager.gunshot();
     send({ type: "SHOOT", payload: { targetX: tX, targetY: tY } });
-  }, [userId, send, localPosRef, aimAngleRef, aimTargetRef, isMobile]);
+    soundManager.gunshot();
+  }, [userId, send, localPosRef, isMobile]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1351,8 +1563,16 @@ decoysRef.current.push({
       const vv = window.visualViewport;
       const w = vv ? Math.floor(vv.width) : window.innerWidth;
       const h = vv ? Math.floor(vv.height) : window.innerHeight;
-      canvas.width = w;
-      canvas.height = h;
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      canvas.width = Math.max(1, Math.floor(w * dpr));
+      canvas.height = Math.max(1, Math.floor(h * dpr));
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+      }
       canvasSizeRef.current = { w, h };
     };
     resize();
@@ -1388,16 +1608,31 @@ decoysRef.current.push({
       mouseRef.current.worldY = e.clientY + cameraRef.current.y;
     };
 
-    const onClick = () => {
+    // Desktop "click to fire". On touch devices the browser fires a synthesized
+    // click after a tap-aim on the right side, which caused phantom shots and
+    // made aiming feel jammed. Ignore clicks produced by touch/pen; touch fires
+    // exclusively through the FIRE button instead.
+    const onClick = (e: MouseEvent) => {
+      if (lastPointerTypeRef.current !== "mouse") return;
       const state = serverStateRef.current;
       if (!state || state.phase !== "PLAYING") return;
       const me = state.players.find((p) => p.id === userId);
       if (!me || !me.isHunter || !me.isAlive) return;
+      // Also ignore this click if it landed on the FIRE button area — the button
+      // handles its own fire.
+      const fireEl = fireButtonRef.current;
+      if (fireEl) {
+        const r = fireEl.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return;
+      }
       fireShot();
     };
 
     // ── Pointer events (iOS-safe: no setPointerCapture on aim zone) ──
     const onPointerDown = (e: PointerEvent) => {
+      // Remember the device that produced this down event so the synthesized
+      // "click" handler can ignore taps (only mouse-clicks should fire).
+      lastPointerTypeRef.current = (e.pointerType || "mouse") as "mouse" | "touch" | "pen";
       const state = serverStateRef.current;
       if (!state || state.phase !== "PLAYING") return;
       const me = state.players.find((p) => p.id === userId);
@@ -1409,7 +1644,7 @@ decoysRef.current.push({
 
       if (isMovementZone && movePointerIdRef.current === null) {
         // Keep pointer capture for joystick so dragging stays smooth
-        try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* iOS may reject */ }
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* iOS may reject */ }
         movePointerIdRef.current = e.pointerId;
         joystickRef.current.active = true;
         joystickRef.current.touchId = e.pointerId;
@@ -1419,7 +1654,14 @@ decoysRef.current.push({
         joystickRef.current.dy = 0;
         setJoystickVisual({ visible: true, originX: e.clientX, originY: e.clientY, knobX: e.clientX, knobY: e.clientY });
       } else if (isAimZone && aimPointerIdRef.current === null) {
-        // No setPointerCapture on aim — lets fire button receive its own pointer events on iOS
+        // CRITICAL: explicitly capture the AIM pointer to the canvas. iOS Safari
+        // has buggy implicit pointer capture — when the aim finger drifts over the
+        // FIRE button (bottom-right), iOS retargets pointermove/pointerup to the
+        // button, so the canvas never sees the lift and aim stays locked ("stuck
+        // aim" bug). Pointer capture is PER-POINTER, so capturing this aim pointer
+        // here does NOT block the FIRE button from receiving its OWN separate
+        // pointer (different pointerId from a different finger). This is the fix.
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* iOS may reject */ }
         aimPointerIdRef.current = e.pointerId;
         aimTapStartTimeRef.current = Date.now();
         aimTapStartXRef.current = e.clientX;
@@ -1501,8 +1743,35 @@ decoysRef.current.push({
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
+    // Safety net: if a touch pointer lifts over a sibling element (e.g. the
+    // FIRE button) the canvas never receives pointerup, which left the aim/move
+    // state jammed. A window-level cleaner clears any pointer id we no longer
+    // hold on the canvas so the next touch starts fresh.
+    const onWindowPointerUp = (e: PointerEvent) => {
+      if (movePointerIdRef.current === e.pointerId) {
+        movePointerIdRef.current = null;
+        joystickRef.current.active = false;
+        joystickRef.current.dx = 0;
+        joystickRef.current.dy = 0;
+        setJoystickVisual({ visible: false, originX: 0, originY: 0, knobX: 0, knobY: 0 });
+      }
+      if (aimPointerIdRef.current === e.pointerId) {
+        aimPointerIdRef.current = null;
+        aimRef.current.active = false;
+        setAimVisual({ visible: false, x: 0, y: 0 });
+      }
+    };
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerUp);
 
-    rafRef.current = requestAnimationFrame(gameLoop);
+    const tick = () => {
+      updateNpcs();
+      updateLocalPlayer();
+      render();
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
 
     return () => {
       window.removeEventListener("resize", resize);
@@ -1516,13 +1785,15 @@ decoysRef.current.push({
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("pointerup", onWindowPointerUp);
+      window.removeEventListener("pointercancel", onWindowPointerUp);
       cancelAnimationFrame(rafRef.current);
     };
-  }, [gameLoop, userId, send, fireShot]);
+  }, [activatePerk, fireShot, localPosRef, render, updateLocalPlayer, updateNpcs, userId]);
 
-  const currentMe = gameState?.players.find((p) => p.id === userId);
-  const hasPerk = currentMe && !currentMe.isHunter && currentMe.isAlive && currentMe.perk !== "none";
-  const isHunter = currentMe?.isHunter ?? false;
+  const currentPlayer = gameState?.players.find((p) => p.id === userId);
+  const hasPerk = currentPlayer && !currentPlayer.isHunter && currentPlayer.isAlive && currentPlayer.perk !== "none";
+  const isHunter = currentPlayer?.isHunter ?? false;
 
   return (
     <>
@@ -1577,7 +1848,7 @@ decoysRef.current.push({
         </div>
       )}
 
-      {isMobile && currentMe?.isHunter && gameState?.phase === "PLAYING" && (
+      {currentPlayer?.isHunter && gameState?.phase === "PLAYING" && (
         <>
           {/* Hunter control hint — only shows first few seconds */}
           {gameState.timeRemaining > (gameState.matchDuration - 8) && (
@@ -1593,32 +1864,45 @@ decoysRef.current.push({
             </div>
           )}
 
-          {/* FIRE button — prominent, bottom-right, hard to miss */}
+          {/* FIRE button — prominent, bottom-right, hard to miss. Responsive size
+           (bigger on tablets) with a larger invisible hit pad so it's easy to
+           hit on phones and iPads. Safe-area aware so it never sits under the
+           home indicator or notch. */}
           <div
             className="absolute z-10"
             style={{
-              bottom: "max(20px, env(safe-area-inset-bottom, 20px))",
-              right: "max(16px, env(safe-area-inset-right, 16px))",
+              bottom: "max(16px, env(safe-area-inset-bottom, 16px))",
+              right: "max(14px, env(safe-area-inset-right, 14px))",
             }}
           >
             <button
+              ref={fireButtonRef}
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Mark as touch so any synthesized click on the canvas is ignored.
+                lastPointerTypeRef.current = e.pointerType === "mouse" ? "mouse" : "touch";
+                fireShot();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
                 fireShot();
               }}
               className="rounded-full flex flex-col items-center justify-center active:scale-90 transition-transform select-none"
               style={{
-                width: 96,
-                height: 96,
+                width: viewport.isCompact ? "clamp(96px, 18vw, 132px)" : "clamp(80px, 11vw, 110px)",
+                height: viewport.isCompact ? "clamp(96px, 18vw, 132px)" : "clamp(80px, 11vw, 110px)",
+                // Invisible padding enlarges the tap target beyond the visible
+                // button (especially important for fast mobile firing).
+                padding: 0,
                 background: "radial-gradient(circle at 38% 32%, #ff6060, #cc1010)",
                 border: "4px solid rgba(255,140,140,0.9)",
                 boxShadow: "0 0 28px rgba(255,40,40,0.65), 0 4px 12px rgba(0,0,0,0.5)",
                 touchAction: "manipulation",
               }}
             >
-              <span style={{ fontSize: 32, lineHeight: 1 }}>🔫</span>
-              <span style={{ color: "white", fontSize: 13, fontWeight: 900, letterSpacing: "0.12em", marginTop: 2 }}>FIRE</span>
+              <span style={{ fontSize: viewport.isCompact ? "clamp(28px,5vw,38px)" : "clamp(22px,3vw,30px)", lineHeight: 1 }}>🔫</span>
+              <span style={{ color: "white", fontSize: viewport.isCompact ? "clamp(12px,2.4vw,16px)" : "clamp(10px,1.6vw,13px)", fontWeight: 900, letterSpacing: "0.12em", marginTop: 2 }}>FIRE</span>
             </button>
           </div>
         </>
@@ -1640,7 +1924,7 @@ decoysRef.current.push({
            }`}
            style={{ touchAction: "manipulation" }}
          >
-<span className="text-2xl">{PERK_ICONS[currentMe?.perk ?? "none"]}</span>
+<span className="text-2xl">{PERK_ICONS[currentPlayer?.perk ?? "none"]}</span>
             {perkActiveState.cooldown && (
               <span className="text-xs text-white font-bold">{perkActiveState.remaining}s</span>
             )}
@@ -1661,6 +1945,3 @@ decoysRef.current.push({
     </>
   );
 }
-
-
-

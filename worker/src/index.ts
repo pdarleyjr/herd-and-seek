@@ -2,9 +2,46 @@ export type AnimalType =
   | "elephant" | "penguin" | "monkey" | "giraffe"
   | "bear" | "dog" | "frog" | "horse"
   | "pig" | "rabbit" | "cow" | "duck"
-  | "panda" | "parrot" | "owl" | "snake";
+  | "panda" | "parrot" | "owl" | "snake"
+  // Ocean roster (The Deep Dark)
+  | "fish" | "turtle" | "crab" | "octopus"
+  | "jellyfish" | "shark" | "seahorse" | "stingray";
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
+
+// ── Level system (mirrors app/src/types.ts — keep both in sync) ─────────────
+export type LevelId = "forest" | "deepDark";
+
+export const FOREST_ANIMALS: AnimalType[] = [
+  "rabbit", "bear", "owl", "snake",
+  "frog", "duck", "dog", "panda",
+];
+
+export const OCEAN_ANIMALS: AnimalType[] = [
+  "fish", "turtle", "crab", "octopus",
+  "jellyfish", "shark", "seahorse", "stingray",
+];
+
+export const LEVEL_ANIMALS: Record<LevelId, AnimalType[]> = {
+  forest: FOREST_ANIMALS,
+  deepDark: OCEAN_ANIMALS,
+};
+
+export function isValidLevelId(id: unknown): id is LevelId {
+  return id === "forest" || id === "deepDark";
+}
+
+export function animalsForLevel(levelId: LevelId): AnimalType[] {
+  return LEVEL_ANIMALS[levelId];
+}
+
+export function isAnimalAllowed(animal: AnimalType, levelId: LevelId): boolean {
+  return LEVEL_ANIMALS[levelId].includes(animal);
+}
+
+export function defaultAnimalForLevel(levelId: LevelId): AnimalType {
+  return LEVEL_ANIMALS[levelId][0];
+}
 
 export interface PlayerState {
   id: string;
@@ -51,13 +88,23 @@ interface RoomState {
   winner: "hunter" | "animals" | null;
   eventLog: string[];
   isSoloMode: boolean;
+  levelId: LevelId;
 }
 
 interface ClientMessage {
-   type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO";
+   type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL";
    payload?: {
      role?: "hunter" | "animal" | "random";
      botCount?: number;
+     levelId?: LevelId;
+     animalType?: AnimalType;
+     isReady?: boolean;
+     perk?: PerkType;
+     x?: number;
+     y?: number;
+     targetX?: number;
+     targetY?: number;
+     duration?: number;
    };
  }
 
@@ -77,25 +124,30 @@ const ALL_ANIMALS: AnimalType[] = [
   "bear", "dog", "frog", "horse",
   "pig", "rabbit", "cow", "duck",
   "panda", "parrot", "owl", "snake",
+  "fish", "turtle", "crab", "octopus",
+  "jellyfish", "shark", "seahorse", "stingray",
 ];
 
-function randomAnimal(): AnimalType {
-  return ALL_ANIMALS[Math.floor(Math.random() * ALL_ANIMALS.length)];
+function randomAnimal(roster?: AnimalType[]): AnimalType {
+  const pool = roster && roster.length ? roster : ALL_ANIMALS;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function randomAnimalExcept(current: AnimalType): AnimalType {
-  const available = ALL_ANIMALS.filter(a => a !== current);
+function randomAnimalExcept(current: AnimalType, roster?: AnimalType[]): AnimalType {
+  const pool = roster && roster.length ? roster : ALL_ANIMALS;
+  const available = pool.filter(a => a !== current);
   return available[Math.floor(Math.random() * available.length)];
 }
 
-function generateNpcSeeds(count: number): NpcSeed[] {
+function generateNpcSeeds(count: number, roster?: AnimalType[]): NpcSeed[] {
   const seeds: NpcSeed[] = [];
+  const pool = roster && roster.length ? roster : ALL_ANIMALS;
   for (let i = 0; i < count; i++) {
     seeds.push({
       id: i,
       x: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
       y: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
-      animalType: randomAnimal(),
+      animalType: randomAnimal(pool),
     });
   }
   return seeds;
@@ -125,6 +177,7 @@ export class GameRoomDurableObject implements DurableObject {
       winner: null,
       eventLog: [],
       isSoloMode: false,
+      levelId: "forest",
     };
   }
 
@@ -181,10 +234,37 @@ export class GameRoomDurableObject implements DurableObject {
 
       case "SELECT_ANIMAL":
         if (this.state.phase === "LOBBY") {
-          player.animalType = parsed.payload?.animalType ?? player.animalType;
+          const choice = parsed.payload?.animalType as AnimalType | undefined;
+          // Only allow morphs valid for the currently selected level.
+          if (choice && isAnimalAllowed(choice, this.state.levelId)) {
+            player.animalType = choice;
+          }
           this.broadcastState();
         }
         break;
+
+      case "SELECT_LEVEL": {
+        if (this.state.phase !== "LOBBY") break;
+        const requested = parsed.payload?.levelId;
+        if (!isValidLevelId(requested)) break;
+        if (requested === this.state.levelId) {
+          this.broadcastState();
+          break;
+        }
+        this.state.levelId = requested;
+        const roster = animalsForLevel(this.state.levelId);
+        // Force every (human) player onto a valid morph for this level.
+        for (const p of this.state.players) {
+          if (!p.isBot && !isAnimalAllowed(p.animalType, this.state.levelId)) {
+            p.animalType = defaultAnimalForLevel(this.state.levelId);
+          }
+        }
+        // Clear leftover bots — they belong to a previous level/match.
+        this.state.players = this.state.players.filter((p) => !p.isBot);
+        this.state.npcSeeds = [];
+        this.broadcastState();
+        break;
+      }
 
       case "SELECT_PERK":
         if (this.state.phase === "LOBBY") {
@@ -284,12 +364,13 @@ export class GameRoomDurableObject implements DurableObject {
 
     const existing = this.state.players.find((p) => p.id === id);
     if (!existing) {
+      const roster = animalsForLevel(this.state.levelId);
       this.state.players.push({
         id,
         username,
         x: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
         y: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
-        animalType: randomAnimal(),
+        animalType: randomAnimal(roster),
         isHunter: false,
         isReady: false,
         isAlive: true,
@@ -301,6 +382,10 @@ export class GameRoomDurableObject implements DurableObject {
       existing.isAlive = true;
       existing.isReady = false;
       existing.connId = connectionId;
+      // Correct any now-invalid morph (e.g. after a level change).
+      if (!isAnimalAllowed(existing.animalType, this.state.levelId)) {
+        existing.animalType = defaultAnimalForLevel(this.state.levelId);
+      }
     }
     this.broadcastState();
   }
@@ -354,13 +439,17 @@ export class GameRoomDurableObject implements DurableObject {
       p.extraLifeUsed = false;
       p.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
       p.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+      // Ensure every animal player has a valid morph for this level.
+      if (!p.isHunter && !isAnimalAllowed(p.animalType, this.state.levelId)) {
+        p.animalType = defaultAnimalForLevel(this.state.levelId);
+      }
     });
 
     this.state.hunterId = hunterId;
     const animalCount = players.length - 1;
     this.state.ammo = animalCount * 10;
     this.state.maxAmmo = animalCount * 10;
-    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(players.length));
+    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(players.length), animalsForLevel(this.state.levelId));
     this.state.phase = "PLAYING";
     this.state.timeRemaining = this.state.matchDuration;
     this.state.matchStartTime = Date.now();
@@ -394,7 +483,7 @@ export class GameRoomDurableObject implements DurableObject {
     if (hitPlayer) {
       if (hitPlayer.perk === "extraLife") {
         const previousAnimal = hitPlayer.animalType;
-        hitPlayer.animalType = randomAnimalExcept(previousAnimal);
+        hitPlayer.animalType = randomAnimalExcept(previousAnimal, animalsForLevel(this.state.levelId));
         hitPlayer.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
         hitPlayer.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
         hitPlayer.perk = "none";
@@ -539,6 +628,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
       matchDuration: this.state.matchDuration,
       winner: this.state.winner,
       eventLog: this.state.eventLog,
+      levelId: this.state.levelId,
     };
   }
 
@@ -568,7 +658,12 @@ endGame(winner: "hunter" | "animals", reason: string) {
     // Remove any leftover bots
     this.state.players = this.state.players.filter((p) => !p.isBot);
 
-    const BOT_ANIMAL_TYPES: AnimalType[] = ["elephant", "monkey", "giraffe", "bear", "pig"];
+    // Bot morphs are drawn only from the selected level's roster.
+    const BOT_ANIMAL_TYPES: AnimalType[] = animalsForLevel(this.state.levelId);
+    // If the human's current morph is not valid for this level, fix it.
+    if (!isAnimalAllowed(human.animalType, this.state.levelId)) {
+      human.animalType = defaultAnimalForLevel(this.state.levelId);
+    }
 
     // Determine final role: random = 50/50 chance hunter or animal
     const finalRole = humanRole === "random" 
@@ -608,7 +703,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
         username: "🤖 AI Hunter",
         x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
         y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150,
-        animalType: "elephant",
+        animalType: defaultAnimalForLevel(this.state.levelId),
         isHunter: true,
         isReady: true,
         isAlive: true,
@@ -655,7 +750,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
     const animalCount = this.state.players.filter((p) => !p.isHunter).length;
     this.state.ammo = animalCount * 10;
     this.state.maxAmmo = animalCount * 10;
-    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length));
+    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length), animalsForLevel(this.state.levelId));
     this.state.phase = "PLAYING";
     this.state.timeRemaining = this.state.matchDuration;
     this.state.matchStartTime = Date.now();
@@ -780,7 +875,7 @@ endGame(winner: "hunter" | "animals", reason: string) {
 
     if (hitPlayer) {
       if (hitPlayer.perk === "extraLife" && !hitPlayer.extraLifeUsed) {
-        hitPlayer.animalType = randomAnimalExcept(hitPlayer.animalType);
+        hitPlayer.animalType = randomAnimalExcept(hitPlayer.animalType, animalsForLevel(this.state.levelId));
         hitPlayer.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
         hitPlayer.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
         hitPlayer.perk = "none";

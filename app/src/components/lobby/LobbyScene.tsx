@@ -3,13 +3,15 @@ import LobbyBackground from "./LobbyBackground";
 import SvgTree from "./SvgTree";
 import HerdSeekLogo from "./HerdSeekLogo";
 import MorphPanel from "./MorphPanel";
+import LevelSelector from "./LevelSelector";
 import UpgradePanel from "./UpgradePanel";
 import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
-import PortraitLobby from "./PortraitLobby";
 import HowToPlayModal from "./HowToPlayModal";
-import { useIsPortrait } from "../../hooks/useIsPortrait";
-import type { SerializedState, AnimalType, PerkType } from "../../types";
+import PortraitLobby from "./PortraitLobby";
+import { useViewportInfo } from "../../hooks/useViewportInfo";
+import type { SerializedState, AnimalType, PerkType, LevelId } from "../../types";
+import { LEVELS, animalsForLevel } from "../../types";
 
 const DURATION_PRESETS = [
   { label: "30s", seconds: 30 },
@@ -27,11 +29,12 @@ interface LobbySceneProps {
   connected: boolean;
   selectedAnimal: AnimalType;
   selectedPerk: PerkType;
+  selectedLevel: LevelId;
   onSelectAnimal: (a: AnimalType) => void;
   onSelectPerk: (p: PerkType) => void;
+  onSelectLevel: (l: LevelId) => void;
   onSetDuration: (seconds: number) => void;
   onReady: () => void;
-  onStart: () => void;
   onStartSolo?: () => void;
   onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
 }
@@ -43,15 +46,16 @@ export default function LobbyScene({
   connected,
   selectedAnimal,
   selectedPerk,
+  selectedLevel,
   onSelectAnimal,
   onSelectPerk,
+  onSelectLevel,
   onSetDuration,
   onReady,
-  onStart,
   onStartSolo,
   onSoloWithBots,
 }: LobbySceneProps) {
-  const isPortrait = useIsPortrait();
+  const { isPortrait, isCompact } = useViewportInfo();
 
   const me = gameState?.players.find((p) => p.id === userId);
   const isReady = me?.isReady ?? false;
@@ -60,9 +64,10 @@ export default function LobbyScene({
   const canStart = allReady;
 
   const inGame = gameState?.phase === "PLAYING";
+  const allowedAnimals = animalsForLevel(selectedLevel);
 
   // Portrait mobile: use vertical tab layout instead of 3-column grid
-  if (isPortrait) {
+  if (isPortrait || isCompact) {
     return (
       <PortraitLobby
         username={username}
@@ -71,13 +76,15 @@ export default function LobbyScene({
         connected={connected}
         selectedAnimal={selectedAnimal}
         selectedPerk={selectedPerk}
+        selectedLevel={selectedLevel}
         onSelectAnimal={onSelectAnimal}
         onSelectPerk={onSelectPerk}
+        onSelectLevel={onSelectLevel}
         onSetDuration={onSetDuration}
         onReady={onReady}
-        onStart={onStart}
         onStartSolo={onStartSolo}
         onSoloWithBots={onSoloWithBots}
+        compact={isCompact}
       />
     );
   }
@@ -117,11 +124,18 @@ export default function LobbyScene({
         </div>
 
         {/* MID-LEFT: Morphs panel */}
-        <div className="pointer-events-auto" style={{ minHeight: 0 }}>
+        <div className="pointer-events-auto flex flex-col gap-2" style={{ minHeight: 0 }}>
+          <LevelSelector
+            selectedLevel={selectedLevel}
+            onSelectLevel={onSelectLevel}
+            disabled={inGame}
+          />
           <MorphPanel
             selected={selectedAnimal}
             onSelect={onSelectAnimal}
             disabled={inGame}
+            allowedAnimals={allowedAnimals}
+            levelId={selectedLevel}
           />
         </div>
 
@@ -156,7 +170,6 @@ export default function LobbyScene({
             allReady={allReady}
             playerCount={playerCount}
             onReady={onReady}
-            onStart={onStart}
             isHost={me?.id === gameState?.players[0]?.id}
           />
         </div>
@@ -165,6 +178,7 @@ export default function LobbyScene({
         <div className="pointer-events-auto flex items-end justify-end">
           <GameModeInfo
             matchDuration={gameState?.matchDuration ?? 120}
+            mapName={LEVELS[selectedLevel].displayName}
             onSetDuration={onSetDuration}
             disabled={inGame}
           />
@@ -232,10 +246,12 @@ function PlayerList({
 
 function GameModeInfo({
   matchDuration,
+  mapName,
   onSetDuration,
   disabled,
 }: {
   matchDuration: number;
+  mapName: string;
   onSetDuration: (s: number) => void;
   disabled: boolean;
 }) {
@@ -286,7 +302,7 @@ function GameModeInfo({
       </div>
       <div className="flex items-center gap-2 justify-end mt-0.5">
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Map</span>
-        <span className="text-[#f5d07a] text-xs font-bold">Forrest</span>
+        <span className="text-[#f5d07a] text-xs font-bold">{mapName}</span>
       </div>
 
       {/* Time row — interactive */}

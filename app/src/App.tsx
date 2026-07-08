@@ -4,36 +4,49 @@ import GameCanvas from "./GameCanvas";
 import LobbyScene from "./components/lobby/LobbyScene";
 import HomeScreen from "./components/home/HomeScreen";
 import { useGameSocket } from "./useGameSocket";
+import { useViewportInfo } from "./hooks/useViewportInfo";
 import {
   type SerializedState,
   type AnimalType,
   type PerkType,
+  type LevelId,
+  type ServerMessage,
+  isAnimalAllowed,
+  defaultAnimalForLevel,
 } from "./types";
 import { soundManager } from "./SoundManager";
 
 type Screen = "AUTH" | "LOBBY" | "GAME";
 
+function readSavedSession() {
+  if (typeof window === "undefined") {
+    return { userId: "", username: "" };
+  }
+
+  return {
+    userId: sessionStorage.getItem("hs_sessionId") ?? "",
+    username: localStorage.getItem("hs_username") ?? "",
+  };
+}
+
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("AUTH");
-  const [userId, setUserId] = useState("");
-  const [username, setUsername] = useState("");
-  const [nameInput, setNameInput] = useState("");
+  const savedSession = readSavedSession();
+  const [screen, setScreen] = useState<Screen>(
+    savedSession.userId && savedSession.username ? "LOBBY" : "AUTH"
+  );
+  const [userId, setUserId] = useState(savedSession.userId);
+  const [username, setUsername] = useState(savedSession.username);
+  const [nameInput, setNameInput] = useState(savedSession.username);
   const [assets, setAssets] = useState<AssetMap | null>(null);
   const [gameState, setGameState] = useState<SerializedState | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
   const [selectedAnimal, setSelectedAnimal] = useState<AnimalType>("elephant");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
   const [endCountdown, setEndCountdown] = useState<number | null>(null);
+  const viewport = useViewportInfo();
   const localPosRef = useRef({ x: 100, y: 100 });
 
   useEffect(() => {
-    const savedId = sessionStorage.getItem("hs_sessionId");
-    const savedName = localStorage.getItem("hs_username");
-    if (savedId && savedName) {
-      setUserId(savedId);
-      setUsername(savedName);
-      setNameInput(savedName);
-    }
     loadAssets().then(setAssets).catch(console.error);
   }, []);
 
@@ -54,41 +67,70 @@ export default function App() {
   }, []);
 
   const handleSocketMessage = useCallback(
-    (data: any) => {
-      if (data.type === "SYNC_STATE" || data.type === "MATCH_START") {
-        const state = data.payload as SerializedState;
-        setGameState(state);
-        if (data.type === "MATCH_START") {
+    (data: ServerMessage) => {
+      switch (data.type) {
+        case "SYNC_STATE":
+        case "MATCH_START": {
+          const state = data.payload;
+          setGameState(state);
+
+          // Reconcile local morph selection with the authoritative server state.
+          // Server corrects invalid morphs on SELECT_LEVEL, so trust it here.
           const me = state.players.find((p) => p.id === userId);
-          if (me) localPosRef.current = { x: me.x, y: me.y };
-          setScreen("GAME");
-        }
-      } else if (data.type === "HIT") {
-        const { hit, extraLife, animalType: newAnimalType, targetId, x, y } = data.payload;
-        if (extraLife) {
-          soundManager.perk();
-          onEvent(`Extra Life! Respawned as ${newAnimalType}.`);
-          if (targetId === userId) {
-            localPosRef.current = { x: x ?? localPosRef.current.x, y: y ?? localPosRef.current.y };
+          if (me) {
+            setSelectedAnimal((prev) => {
+              const lvl = state.levelId ?? "forest";
+              if (!isAnimalAllowed(prev, lvl)) return me.animalType;
+              return prev === me.animalType ? prev : me.animalType;
+            });
           }
-        } else if (hit) {
-          soundManager.hit();
-          onEvent("Player neutralized!");
-        } else {
-          soundManager.miss();
-          onEvent("Hunter missed!");
+
+          if (data.type === "MATCH_START") {
+            const meLocal = state.players.find((p) => p.id === userId);
+            if (meLocal) localPosRef.current = { x: meLocal.x, y: meLocal.y };
+            setScreen("GAME");
+            setEndCountdown(null);
+            break;
+          }
+
+          if (state.phase === "LOBBY" && screen === "GAME") {
+            setScreen("LOBBY");
+            setEndCountdown(null);
+          }
+          break;
         }
-      } else if (data.type === "GAME_OVER") {
-        const { winner, reason, state } = data.payload;
-        if (state) setGameState(state);
-        soundManager.gameEnd();
-        onEvent(
-          `Game Over: ${reason} — ${winner === "hunter" ? "Hunter" : "Animals"} win!`
-        );
-        setScreen("GAME");
+        case "HIT": {
+          const { hit, extraLife, animalType: newAnimalType, targetId, x, y } = data.payload;
+          if (extraLife) {
+            soundManager.perk();
+            onEvent(`Extra Life! Respawned as ${newAnimalType}.`);
+            if (targetId === userId) {
+              localPosRef.current = {
+                x: x ?? localPosRef.current.x,
+                y: y ?? localPosRef.current.y,
+              };
+            }
+          } else if (hit) {
+            soundManager.hit();
+            onEvent("Player neutralized!");
+          } else {
+            soundManager.miss();
+            onEvent("Hunter missed!");
+          }
+          break;
+        }
+        case "GAME_OVER": {
+          const { reason, state } = data.payload;
+          setGameState(state);
+          soundManager.gameEnd();
+          onEvent(`Game Over: ${reason}`);
+          setScreen("GAME");
+          setEndCountdown(5);
+          break;
+        }
       }
     },
-    [userId, onEvent]
+    [userId, onEvent, screen]
   );
 
   const { send, connected } = useGameSocket(userId, username, handleSocketMessage);
@@ -107,31 +149,27 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (screen !== "GAME" || gameState?.phase !== "ENDED") {
-      setEndCountdown(null);
-      return;
-    }
-    setEndCountdown(5);
+    if (screen !== "GAME" || gameState?.phase !== "ENDED" || endCountdown === null) return;
+
     const interval = window.setInterval(() => {
-      setEndCountdown((prev) => (prev === null ? null : Math.max(0, prev - 1)));
+      setEndCountdown((prev) => {
+        if (prev === null) return null;
+        return Math.max(0, prev - 1);
+      });
     }, 1000);
+
     return () => window.clearInterval(interval);
-  }, [gameState?.phase, screen]);
+  }, [endCountdown, gameState?.phase, screen]);
 
   useEffect(() => {
-    if (endCountdown !== 0) return;
-    returnToLobby();
-  }, [endCountdown, returnToLobby]);
+    if (screen !== "GAME" || gameState?.phase !== "ENDED" || endCountdown !== 0) return;
 
-  // Handle server-initiated return to lobby (server resets room after 5s countdown).
-  // Keep the server's freshly-broadcast lobby state (with our player still in it)
-  // instead of nulling it, so the post-game lobby immediately shows our player slot.
-  useEffect(() => {
-    if (gameState?.phase === "LOBBY" && screen === "GAME") {
-      setScreen("LOBBY");
-      setEndCountdown(null);
-    }
-  }, [gameState?.phase, screen]);
+    const timeout = window.setTimeout(() => {
+      returnToLobby();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [endCountdown, gameState?.phase, returnToLobby, screen]);
 
   if (!assets) {
     return (
@@ -152,6 +190,7 @@ export default function App() {
   }
 
   if (screen === "LOBBY" && (!gameState || gameState.phase === "LOBBY")) {
+    const selectedLevel: LevelId = gameState?.levelId ?? "forest";
     return (
       <LobbyScene
         username={username}
@@ -160,6 +199,7 @@ export default function App() {
         connected={connected}
         selectedAnimal={selectedAnimal}
         selectedPerk={selectedPerk}
+        selectedLevel={selectedLevel}
         onSelectAnimal={(a) => {
           setSelectedAnimal(a);
           send({ type: "SELECT_ANIMAL", payload: { animalType: a } });
@@ -168,16 +208,19 @@ export default function App() {
           setSelectedPerk(p);
           send({ type: "SELECT_PERK", payload: { perk: p } });
         }}
+        onSelectLevel={(lvl) => {
+          // Optimistically fix our morph so the panel updates instantly; the
+          // server also enforces this and re-syncs authoritative state.
+          setSelectedAnimal((prev) => (isAnimalAllowed(prev, lvl) ? prev : defaultAnimalForLevel(lvl)));
+          send({ type: "SELECT_LEVEL", payload: { levelId: lvl } });
+        }}
         onSetDuration={(seconds) => {
           send({ type: "SET_DURATION", payload: { duration: seconds } });
         }}
-onReady={() => {
+        onReady={() => {
            send({ type: "READY" });
          }}
-        onStart={() => {
-          // Match starts automatically when all ready — no explicit start needed
-        }}
-onStartSolo={() => {
+        onStartSolo={() => {
            // No role specified — server randomly assigns hunter or animal
            send({ type: "START_SOLO", payload: {} });
          }}
@@ -212,8 +255,15 @@ onStartSolo={() => {
             ⏱ {formatTime(gameState.timeRemaining)}
           </div>
 
-{/* Event Log - bottom left, smaller on mobile */}
-           <div className="absolute bottom-44 sm:bottom-4 left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1">
+          {/* Event Log - lifted above controls on touch devices */}
+          <div
+            className="absolute left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1"
+            style={{
+              bottom: viewport.isCompact
+                ? "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))"
+                : "1rem",
+            }}
+          >
              <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
              {eventLog.length === 0 && (
                <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
@@ -225,7 +275,14 @@ onStartSolo={() => {
 
            {/* Hunter Ammo - bottom right, responsive, positioned above fire button */}
            {isHunter && (
-             <div className="absolute bottom-44 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
+             <div
+               className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg"
+               style={{
+                 bottom: viewport.isCompact
+                   ? "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))"
+                   : "1rem",
+               }}
+             >
                <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
                <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
                  {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
@@ -245,7 +302,14 @@ onStartSolo={() => {
 
 {/* Animal role indicator - bottom right, positioned below perk button on mobile */}
             {!isHunter && me?.isAlive && (
-              <div className="absolute bottom-24 sm:bottom-4 right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm">
+              <div
+                className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm"
+                style={{
+                  bottom: viewport.isCompact
+                    ? "max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 12px))"
+                    : "1rem",
+                }}
+              >
                 <p>
                   Role: <span className="text-green-400">Animal</span>
                 </p>
