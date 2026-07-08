@@ -10,7 +10,7 @@ const RULES = [
   {
     icon: "🎯",
     title: "You Are the Hunter — Find & Tag",
-    text: "One player is the Hunter. Locate the real players hiding among the NPCs. Aim and click or tap the FIRE button to shoot them. Don't waste all your ammo on misses!",
+    text: "One player is the Hunter. Locate the real players hiding among the NPCs. Aim and click or tap the FIRE button to shoot them. On touchscreens, a quick double tap on the right side also fires. Don't waste all your ammo on misses!",
     color: "#ff6b6b",
   },
   {
@@ -40,7 +40,7 @@ const RULES = [
   {
     icon: "📱",
     title: "Mobile Controls",
-    text: "Animals: drag left side to move, tap perk button to use upgrade.\nHunter: drag left to move · drag right side to aim crosshair · click or tap the big FIRE button to shoot.",
+    text: "Animals: drag left side to move, tap perk button to use upgrade.\nHunter: drag left to move · drag right side to aim crosshair · quick double tap the right side or hit the big FIRE button to shoot.",
     color: "#88aaff",
   },
   {

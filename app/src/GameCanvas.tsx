@@ -235,6 +235,9 @@ export default function GameCanvas({
   const aimTapStartTimeRef = useRef(0);
   const aimTapStartXRef = useRef(0);
   const aimTapStartYRef = useRef(0);
+  // Double-tap tap candidate used to turn a quick aim tap into a shot on touch.
+  const touchTapCandidateRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  const touchTapClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // World-space position of current aim target (used for crosshair rendering)
   const aimTargetRef = useRef<{ worldX: number; worldY: number } | null>(null);
   // Mobile aim-assist: the player id the shot is currently being nudged toward.
@@ -1558,6 +1561,43 @@ decoysRef.current.push({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const DOUBLE_TAP_WINDOW_MS = 320;
+    const DOUBLE_TAP_MOVE_PX = 32;
+    const TAP_MAX_DURATION_MS = 260;
+    const TAP_MAX_MOVE_PX = 18;
+
+    const clearTouchTapCandidate = () => {
+      if (touchTapClearTimerRef.current !== null) {
+        clearTimeout(touchTapClearTimerRef.current);
+        touchTapClearTimerRef.current = null;
+      }
+      touchTapCandidateRef.current = null;
+    };
+
+    const registerTouchTap = (x: number, y: number) => {
+      const now = Date.now();
+      const candidate = touchTapCandidateRef.current;
+      if (
+        candidate &&
+        now - candidate.time <= DOUBLE_TAP_WINDOW_MS &&
+        Math.hypot(x - candidate.x, y - candidate.y) <= DOUBLE_TAP_MOVE_PX
+      ) {
+        clearTouchTapCandidate();
+        fireShot();
+        return;
+      }
+
+      clearTouchTapCandidate();
+      const nextCandidate = { time: now, x, y };
+      touchTapCandidateRef.current = nextCandidate;
+      touchTapClearTimerRef.current = window.setTimeout(() => {
+        if (touchTapCandidateRef.current === nextCandidate) {
+          touchTapCandidateRef.current = null;
+        }
+        touchTapClearTimerRef.current = null;
+      }, DOUBLE_TAP_WINDOW_MS);
+    };
+
     const resize = () => {
       // Use visualViewport when available (handles iOS address bar correctly)
       const vv = window.visualViewport;
@@ -1729,8 +1769,22 @@ decoysRef.current.push({
         aimRef.current.active = false;
         aimRef.current.touchId = null;
 
-        // Drag to aim — tap-to-fire removed to eliminate accidental misfires.
-        // Use the FIRE button (bottom-right) to shoot.
+        // Touch/tap aim still works, but a second quick tap in roughly the
+        // same spot is treated as fire so touchscreen users have a natural
+        // two-step "aim, then shoot" gesture. Dragging still only aims.
+        const tapDuration = Date.now() - aimTapStartTimeRef.current;
+        const tapDistance = Math.hypot(
+          e.clientX - aimTapStartXRef.current,
+          e.clientY - aimTapStartYRef.current,
+        );
+        const isTap = tapDuration <= TAP_MAX_DURATION_MS && tapDistance <= TAP_MAX_MOVE_PX;
+        if (e.pointerType !== "mouse") {
+          if (isTap) {
+            registerTouchTap(e.clientX, e.clientY);
+          } else {
+            clearTouchTapCandidate();
+          }
+        }
         setAimVisual({ visible: false, x: 0, y: 0 });
       }
     };
@@ -1787,6 +1841,7 @@ decoysRef.current.push({
       canvas.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("pointerup", onWindowPointerUp);
       window.removeEventListener("pointercancel", onWindowPointerUp);
+      clearTouchTapCandidate();
       cancelAnimationFrame(rafRef.current);
     };
   }, [activatePerk, fireShot, localPosRef, render, updateLocalPlayer, updateNpcs, userId]);
@@ -1859,6 +1914,7 @@ decoysRef.current.push({
               <div className="inline-flex flex-col gap-1 bg-black/70 rounded-xl px-4 py-2">
                 <span className="text-white/90 text-sm font-bold">🎮 Hunter Controls</span>
                 <span className="text-white/70 text-xs">Drag right → Aim crosshair</span>
+                <span className="text-white/70 text-xs">Double tap right → FIRE</span>
                 <span className="text-red-300 text-xs font-bold">Big red button → FIRE</span>
               </div>
             </div>

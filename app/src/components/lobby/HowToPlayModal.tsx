@@ -9,7 +9,7 @@ const RULES = [
   { icon: "🌊", color: "#39c0e6", title: "The Deep Dark — Ocean Hide & Seek",
     text: "You're a sea creature among a moving shoal. Hide in kelp 🌿 and seaweed for a 🪸 CONCEALED bonus. Boats, barrels, and reefs are landmarks and cover. Current lanes drift across the map. The hunter is a SCUBA DIVER using sonar and careful shots." },
   { icon: "🎯", color: "#ff6b6b", title: "You Are the Hunter — Aim & Tag",
-    text: "You have limited ammo. Find the REAL players hiding among hundreds of NPC animals. Aim your crosshair, then click or tap FIRE. Run out of ammo and animals win." },
+    text: "You have limited ammo. Find the REAL players hiding among hundreds of NPC animals. Aim your crosshair, then click or tap FIRE. On touchscreens, a quick double tap on the right side also fires. Run out of ammo and animals win." },
   { icon: "🦓", color: "#f5d07a", title: "Choose Your Morph",
     text: "Before each match, pick a disguise that matches the level's wildlife. Pick one that's common in the NPC herd — if fish are everywhere, be a fish!" },
   { icon: "⚡", color: "#c8a05a", title: "Upgrades & Perks",
@@ -17,7 +17,7 @@ const RULES = [
   { icon: "📡", color: "#ff8844", title: "Hunter Radar / Sonar",
     text: "The Hunter's minimap has a radar cycle:\n• RADAR ACTIVE (5s) — animal positions shown as red dots.\n• SCANNING (5s) — positions go dark.\nAnimals: freeze when the minimap border turns orange!\nOcean hunters: sonar pings give approximate zones, not exact positions." },
   { icon: "📱", color: "#88aaff", title: "Mobile & Tablet Controls",
-    text: "Animals: drag the LEFT side to move, tap your perk button to activate.\nHunter:\n• Left thumb → move.\n• Right thumb → AIM the crosshair. Dragging aims; it NEVER fires.\n• Large red FIRE button (bottom-right) → click or tap to shoot.\n• Aim assist softly nudges shots toward the nearest animal on phones/tablets.\n• The FIRE button is safe-area aware so it's never under the home indicator. The screen will not scroll or zoom." },
+    text: "Animals: drag the LEFT side to move, tap your perk button to activate.\nHunter:\n• Left thumb → move.\n• Right thumb → AIM the crosshair. Dragging aims; it NEVER fires.\n• Quick double tap on the right side → shoot.\n• Large red FIRE button (bottom-right) → click or tap to shoot.\n• Aim assist softly nudges shots toward the nearest animal on phones/tablets.\n• The FIRE button is safe-area aware so it's never under the home indicator. The screen will not scroll or zoom." },
   { icon: "🎮", color: "#f5d07a", title: "Solo Practice",
     text: "Tap 'Play Solo vs AI' to practice alone. The game randomly makes you Hunter or Animal against AI bots. Bots use the selected level's morphs and behavior. Great for learning before playing with others!" },
 ];
