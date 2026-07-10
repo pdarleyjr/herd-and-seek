@@ -61,6 +61,7 @@ export default function OpenWorldCanvas({
   const keys = useRef<Record<string, boolean>>({});
   const lastSync = useRef(0);
   const particlesRef = useRef<Particle[]>([]);
+  const camRef = useRef<{ x: number; y: number }>({ x: LODGE.cx, y: LODGE.cy });
   const [contextAction, setContextAction] = useState<ContextAction | null>(null);
   const [usingTouch, setUsingTouch] = useState(false);
   const [joyKnob, setJoyKnob] = useState({ x: 0, y: 0 });
@@ -121,7 +122,10 @@ export default function OpenWorldCanvas({
         canvas.height = Math.floor(h * dpr);
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const cam: Camera = { camX: localPos.current.x, camY: localPos.current.y, width: w, height: h, scale: 1 };
+      const blend = 1 - Math.exp(-8 * dt);
+      camRef.current.x += (localPos.current.x - camRef.current.x) * blend;
+      camRef.current.y += (localPos.current.y - camRef.current.y) * blend;
+      const cam: Camera = { camX: camRef.current.x, camY: camRef.current.y, width: w, height: h, scale: 1 };
 
       // Movement input.
       const js = joyOrigin.current && joyCurrent.current

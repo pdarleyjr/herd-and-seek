@@ -58,9 +58,9 @@ function getDecor(): Deco[] {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed / 0x7fffffff;
   };
-  const kinds: Deco["kind"][] = ["grass", "grass", "grass", "rock", "bush", "flower", "log", "mound", "sign", "twig"];
+  const kinds: Deco["kind"][] = ["grass", "grass", "grass", "rock", "bush", "flower", "log", "mound", "mound", "sign", "twig"];
   const list: Deco[] = [];
-  for (let i = 0; i < 1400; i++) {
+  for (let i = 0; i < 850; i++) {
     list.push({
       x: rnd() * OPEN_WORLD_WORLD_SIZE,
       y: rnd() * OPEN_WORLD_WORLD_SIZE,
@@ -209,23 +209,43 @@ function drawDistrict(ctx: CanvasRenderingContext2D, cam: Camera, id: string, cx
 }
 
 function drawAcacia(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, time: number) {
-  const sway = Math.sin(time / 1600 + x) * 2 * scale;
+  const sway = Math.sin(time / 1600 + x) * 3 * scale;
   ctx.save();
   ctx.translate(x, y);
-  ctx.strokeStyle = "#5a3a1a";
-  ctx.lineWidth = 6 * scale;
+  // ground shadow
+  ctx.fillStyle = "rgba(40,30,15,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(sway * 0.3, 4 * scale, 34 * scale, 10 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // trunk
+  ctx.strokeStyle = "#6b4a2a";
+  ctx.lineWidth = 7 * scale;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(sway, -40 * scale);
+  ctx.lineTo(sway, -34 * scale);
   ctx.stroke();
-  ctx.fillStyle = "#3a5a2a";
+  // branches
+  ctx.lineWidth = 3.5 * scale;
+  ctx.strokeStyle = "#7a5636";
+  for (const a of [-0.7, 0, 0.7]) {
+    ctx.beginPath();
+    ctx.moveTo(sway, -34 * scale);
+    ctx.lineTo(sway + Math.cos(a - 1.2) * 26 * scale, -34 * scale + Math.sin(a - 1.2) * 18 * scale);
+    ctx.stroke();
+  }
+  // flattened umbrella canopy (two tones for volume)
+  ctx.fillStyle = "#3f6b2e";
   ctx.beginPath();
-  ctx.ellipse(sway, -52 * scale, 38 * scale, 16 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(sway, -58 * scale, 42 * scale, 18 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#466b33";
+  ctx.fillStyle = "#4f8038";
   ctx.beginPath();
-  ctx.ellipse(sway - 10 * scale, -46 * scale, 22 * scale, 12 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(sway - 8 * scale, -64 * scale, 30 * scale, 12 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#5c9a44";
+  ctx.beginPath();
+  ctx.ellipse(sway - 12 * scale, -68 * scale, 16 * scale, 7 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -344,21 +364,34 @@ export function drawWorld(
   ctx.fillStyle = sun;
   ctx.fillRect(0, 0, W, H);
 
-  // 3. Terrain zones + trails.
+  // 3. Terrain zones + trails (worn dirt path, soft edges).
   for (const d of DISTRICTS) drawDistrict(ctx, cam, d.id, d.cx, d.cy, reducedMotion ? 0 : time);
-  ctx.strokeStyle = "rgba(110,80,50,0.5)";
-  ctx.lineWidth = 10 * cam.scale;
+  const trailPts = [
+    worldToScreen(cam, 1500, 1500),
+    worldToScreen(cam, 650, 1500),
+    worldToScreen(cam, 2300, 820),
+    worldToScreen(cam, 2300, 2250),
+    worldToScreen(cam, 1500, 1500),
+  ];
+  // soft outer edge
+  ctx.strokeStyle = "rgba(120,92,58,0.55)";
+  ctx.lineWidth = 18 * cam.scale;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(...worldToScreen(cam, 1500, 1500));
-  ctx.lineTo(...worldToScreen(cam, 650, 1500));
-  ctx.lineTo(...worldToScreen(cam, 2300, 820));
-  ctx.lineTo(...worldToScreen(cam, 2300, 2250));
-  ctx.lineTo(...worldToScreen(cam, 1500, 1500));
+  ctx.moveTo(trailPts[0][0], trailPts[0][1]);
+  for (let i = 1; i < trailPts.length; i++) ctx.lineTo(trailPts[i][0], trailPts[i][1]);
+  ctx.stroke();
+  // lighter packed-dirt center
+  ctx.strokeStyle = "rgba(176,140,92,0.85)";
+  ctx.lineWidth = 10 * cam.scale;
+  ctx.beginPath();
+  ctx.moveTo(trailPts[0][0], trailPts[0][1]);
+  for (let i = 1; i < trailPts.length; i++) ctx.lineTo(trailPts[i][0], trailPts[i][1]);
   ctx.stroke();
 
   // 4/5. Static props (culled).
-  const grassDensity = quality === "high" ? 1 : quality === "balanced" ? 0.6 : 0.35;
+  const grassDensity = quality === "high" ? 0.55 : quality === "balanced" ? 0.4 : 0.25;
   for (const d of getDecor()) {
     if (d.kind === "grass" && Math.random() > grassDensity) continue;
     const [sx, sy] = worldToScreen(cam, d.x, d.y);
@@ -367,13 +400,13 @@ export function drawWorld(
   }
 
   // 6. Foreground grass near camera.
-  // 7. Ambient herds.
+  // 7. Ambient herds (smaller, hazier for depth).
   const herdCount = quality === "high" ? getHerds().length : Math.min(24, getHerds().length);
   for (let i = 0; i < herdCount; i++) {
     const h = getHerds()[i];
     const [sx, sy] = worldToScreen(cam, h.x, h.y);
     if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
-    drawAnimal(ctx, sx, sy, 22 * cam.scale, h.type, 1, reducedMotion ? 0 : time / 2, 0, false);
+    drawAnimal(ctx, sx, sy, 34 * cam.scale, h.type, 1, reducedMotion ? 0 : time / 2, 0, false);
   }
 
   // 8. Collectibles.
@@ -389,10 +422,10 @@ export function drawWorld(
   const labels: { sx: number; sy: number; text: string; local: boolean; facing: Facing }[] = [];
   for (const p of zone.players) {
     const [sx, sy] = worldToScreen(cam, p.x, p.y);
-    if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
+    if (sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) continue;
     const facing: Facing = p.id === localId ? 1 : 1;
-    drawAnimal(ctx, sx, sy, 34 * cam.scale, p.animalType, facing, reducedMotion ? 0 : time / 2, reducedMotion ? 0 : time / 240, p.id === localId);
-    labels.push({ sx, sy: sy - 30 * cam.scale, text: p.username, local: p.id === localId, facing });
+    drawAnimal(ctx, sx, sy, 72 * cam.scale, p.animalType, facing, reducedMotion ? 0 : time / 2, reducedMotion ? 0 : time / 240, p.id === localId);
+    labels.push({ sx, sy: sy - 60 * cam.scale, text: p.username, local: p.id === localId, facing });
   }
   // vertical stack to avoid overlap
   labels.sort((a, b) => a.sy - b.sy);
@@ -485,6 +518,20 @@ function drawDeco(ctx: CanvasRenderingContext2D, x: number, y: number, d: Deco, 
       ctx.moveTo(x + 6 * s, y - 6 * s);
       ctx.lineTo(x + 2 * s, y - 12 * s);
       ctx.stroke();
+      ctx.fillStyle = "rgba(40,30,15,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(x, y + 4 * s, 13 * s, 5 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#9c7a4a";
+      ctx.beginPath();
+      ctx.moveTo(x - 11 * s, y + 2 * s);
+      ctx.quadraticCurveTo(x, y - 18 * s, x + 11 * s, y + 2 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#b08a52";
+      ctx.beginPath();
+      ctx.ellipse(x, y - 8 * s, 6 * s, 3 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
       break;
     case "sign":
       ctx.fillStyle = "#7a5a32";

@@ -11,7 +11,7 @@ export type AnimalType =
   | "ostrich" | "meerkat" | "hyena" | "secretarybird";
 
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
-export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
+export type GamePhase = "LOBBY" | "COUNTDOWN" | "PLAYING" | "ENDED";
 
 // ── Level system (shared shape — mirrored manually in worker/src/index.ts) ──
 export type LevelId = "forest" | "deepDark" | "savannah";
@@ -105,6 +105,9 @@ export interface PlayerState {
   perk: PerkType;
   extraLifeUsed?: boolean;
   isBot?: boolean; // true for AI-controlled solo practice opponents
+  connectionStatus?: "connected" | "reconnecting";
+  joinedAt?: number;
+  lastSeenAt?: number;
 }
 
 export interface ReadyPayload {
@@ -160,6 +163,9 @@ export interface SerializedState {
   winner: "hunter" | "animals" | null;
   eventLog: string[];
   levelId: LevelId;
+  hostUserId?: string | null;
+  maxPlayers?: number;
+  countdownEndsAt?: number | null;
 }
 
 export interface StartSoloPayload {
@@ -255,6 +261,24 @@ export const PERK_OPTIONS: { value: PerkType; label: string; description: string
     emoji: "⚡",
   },
 ];
+
+// ── Connection lifecycle (mirrors worker connection model) ───────────────────
+export type ConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "failed";
+
+export type MatchMode = "multiplayer" | "solo";
+
+export interface MatchSession {
+  roomId: string;
+  mode: MatchMode;
+  hostUserId: string;
+  createdAt: number;
+}
 
 export const WORLD_SIZE = 2000;
 export const PLAYER_COLLISION_RADIUS = 34;
@@ -362,6 +386,8 @@ export type ClientMessage =
   | { type: "SET_DURATION"; payload: SetDurationPayload }
   | { type: "START_SOLO"; payload: StartSoloPayload }
   | { type: "SELECT_LEVEL"; payload: SelectLevelPayload }
+  | { type: "LEAVE_ROOM" }
+  | { type: "CLOSE_ROOM" }
   | { type: "ADMIN_AUTH"; payload: { adminKey: string } }
   | {
       type: "ADMIN_CMD";

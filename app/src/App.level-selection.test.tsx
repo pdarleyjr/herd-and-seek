@@ -8,9 +8,9 @@ import type { ServerMessage } from "./types";
 const sendMock = vi.fn();
 
 vi.mock("./useGameSocket", () => ({
-  useGameSocket: (_userId: string, _username: string, onMessage: (data: ServerMessage) => void) => {
-    void onMessage;
-    return { send: sendMock, connected: true };
+  useGameSocket: (options: { onMessage: (data: ServerMessage) => void }) => {
+    void options;
+    return { send: sendMock, status: "connected" as const };
   },
 }));
 
@@ -63,22 +63,20 @@ vi.mock("./components/home/HomeScreen", () => ({
   default: () => <div data-testid="home-screen" />,
 }));
 
-vi.mock("./components/lobby/LobbyScene", () => ({
+// ModernLobby is the lobby implementation used by App.
+vi.mock("./components/lobby/ModernLobby", () => ({
   default: ({
     selectedLevel,
     onSelectLevel,
   }: {
     selectedLevel: string;
-    onSelectLevel: (level: "forest" | "deepDark") => void;
+    onSelectLevel: (level: "forest" | "deepDark" | "savannah") => void;
   }) => (
     <div>
       <div data-testid="selected-level">{selectedLevel}</div>
-      <button type="button" onClick={() => onSelectLevel("forest")}>
-        forest
-      </button>
-      <button type="button" onClick={() => onSelectLevel("deepDark")}>
-        deep dark
-      </button>
+      <button type="button" onClick={() => onSelectLevel("forest")}>forest</button>
+      <button type="button" onClick={() => onSelectLevel("deepDark")}>deep dark</button>
+      <button type="button" onClick={() => onSelectLevel("savannah")}>savannah</button>
     </div>
   ),
 }));
@@ -93,6 +91,11 @@ describe("App lobby level selection", () => {
     localStorage.clear();
     sessionStorage.setItem("hs_sessionId", "session-1");
     localStorage.setItem("hs_username", "Tester");
+    // Seed a multiplayer room session so App boots directly into the lobby.
+    sessionStorage.setItem(
+      "hs_roomSession",
+      JSON.stringify({ roomId: "TEST-ROOM", mode: "multiplayer", hostUserId: "session-1", createdAt: 0 })
+    );
 
     container = document.createElement("div");
     document.body.appendChild(container);

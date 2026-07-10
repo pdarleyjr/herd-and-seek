@@ -24,7 +24,12 @@ export type AnimalType =
   | "zebra" | "gazelle" | "wildebeest" | "warthog"
   | "ostrich" | "meerkat" | "hyena" | "secretarybird";
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
-export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
+export type GamePhase = "LOBBY" | "COUNTDOWN" | "PLAYING" | "ENDED";
+
+// Matches may never use the legacy global default room. Clients must always
+// connect with an explicit room id (multiplayer code, or a solo room id).
+export const COUNTDOWN_MS = 3000;
+export const MAX_PLAYERS_DEFAULT = 8;
 
 // ── Level system (mirrors app/src/types.ts — keep both in sync) ─────────────
 export type LevelId = "forest" | "deepDark" | "savannah";
@@ -84,6 +89,7 @@ export interface PlayerState {
   botPatrolling?: boolean;
   botPatrolX?: number;
   botPatrolY?: number;
+  botLastUpdate?: number;
 }
 
 export interface NpcSeed {
@@ -103,10 +109,15 @@ interface RoomState {
   timeRemaining: number;
   matchDuration: number;
   matchStartTime: number;
+  countdownEndsAt: number | null;
   winner: "hunter" | "animals" | null;
   eventLog: string[];
   isSoloMode: boolean;
   levelId: LevelId;
+  hostUserId: string | null;
+  maxPlayers: number;
+  createdAt: number;
+  closed: boolean;
 }
 
 // ── Open-world shared types ──────────────────────────────────────────────────
@@ -305,7 +316,7 @@ function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNod
 
 // ── Match-mode message types ─────────────────────────────────────────────────
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD" | "LEAVE_ROOM" | "CLOSE_ROOM";
   payload?: {
     role?: "hunter" | "animal" | "random";
     botCount?: number;
@@ -422,6 +433,21 @@ const JSON_HEADERS = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "content-type, x-internal-reward-secret, authorization",
 };
+
+// ── Structured, bounded diagnostics logging (no personal data beyond ids) ─────
+function logEvent(event: string, fields: Record<string, unknown> = {}): void {
+  try {
+    // Bound the event object so logging can never leak oversized payloads.
+    const safe: Record<string, unknown> = { event, timestamp: Date.now() };
+    for (const [k, v] of Object.entries(fields)) {
+      if (k === "state" || k === "profile") continue; // never log full snapshots
+      safe[k] = v;
+    }
+    console.log(JSON.stringify(safe));
+  } catch {
+    /* logging must never crash the request path */
+  }
+}
 
 // ── Profile Durable Object (authoritative wallet/ledger) ─────────────────────
 import {
@@ -624,7 +650,9 @@ export class GameRoomDurableObject implements DurableObject {
     this.state = {
       phase: "LOBBY", players: [], npcSeeds: [], hunterId: null, ammo: 0, maxAmmo: 0,
       timeRemaining: MATCH_DURATION_DEFAULT, matchDuration: MATCH_DURATION_DEFAULT,
-      matchStartTime: 0, winner: null, eventLog: [], isSoloMode: false, levelId: "forest",
+      matchStartTime: 0, countdownEndsAt: null, winner: null, eventLog: [], isSoloMode: false,
+      levelId: "forest", hostUserId: null, maxPlayers: MAX_PLAYERS_DEFAULT, createdAt: Date.now(),
+      closed: false,
     };
   }
 
@@ -637,6 +665,19 @@ export class GameRoomDurableObject implements DurableObject {
     const userId = url.searchParams.get("userId") || crypto.randomUUID();
     const username = url.searchParams.get("username") || "Anonymous";
     const connectionId = crypto.randomUUID();
+
+    if (this.state.closed) {
+      const pair = new WebSocketPair();
+      pair[1].accept();
+      pair[1].close(4001, "room_closed");
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    if (this.state.players.length >= this.state.maxPlayers && !this.state.players.some((p) => p.id === userId)) {
+      const pair = new WebSocketPair();
+      pair[1].accept();
+      pair[1].close(4002, "room_full");
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -670,8 +711,20 @@ export class GameRoomDurableObject implements DurableObject {
     switch (parsed.type) {
       case "READY":
         player.isReady = parsed.payload?.isReady ?? !player.isReady;
+        logEvent("ready", { roomId: this.roomId(), userId, isReady: player.isReady });
         this.broadcastState();
-        this.tryStartMatch();
+        if (this.state.phase === "COUNTDOWN") {
+          const humans = this.state.players.filter((p) => !p.isBot);
+          if (humans.length < 2 || !humans.every((p) => p.isReady)) {
+            this.state.phase = "LOBBY";
+            this.state.countdownEndsAt = null;
+            this.state.eventLog.unshift("Countdown canceled: not all players ready.");
+            this.state.eventLog = this.state.eventLog.slice(0, 8);
+            this.broadcastState();
+          }
+        } else {
+          this.tryStartMatch();
+        }
         break;
       case "SELECT_ANIMAL":
         if (this.state.phase === "LOBBY") {
@@ -740,6 +793,22 @@ export class GameRoomDurableObject implements DurableObject {
           }
         }
         break;
+      case "LEAVE_ROOM":
+        this.removePlayer(userId);
+        for (const ws of this.ctx.getWebSockets()) {
+          const att = ws.deserializeAttachment() as { userId: string } | null;
+          if (att?.userId === userId) { try { ws.close(1000, "client_leave"); } catch { /* ignore */ } }
+        }
+        break;
+      case "CLOSE_ROOM":
+        if (this.state.hostUserId === userId) {
+          this.state.closed = true;
+          logEvent("room_closed", { roomId: this.roomId(), by: userId });
+          for (const ws of this.ctx.getWebSockets()) { try { ws.close(4001, "room_closed"); } catch { /* ignore */ } }
+          this.resetRoom();
+          this.state.closed = true;
+        }
+        break;
     }
   }
 
@@ -756,6 +825,15 @@ export class GameRoomDurableObject implements DurableObject {
     this.removePlayer(attachment.userId, attachment.connectionId);
   }
 
+  private roomId(): string {
+    // Best-effort room label for logs (derived from the DO id name).
+    try {
+      return this.ctx.id.toString();
+    } catch {
+      return this.state.isSoloMode ? "solo" : "match";
+    }
+  }
+
   addPlayer(id: string, username: string, connectionId: string) {
     if (this.state.isSoloMode && this.state.phase === "PLAYING") {
       const anyHuman = this.state.players.some((p) => !p.isBot);
@@ -764,13 +842,18 @@ export class GameRoomDurableObject implements DurableObject {
     const existing = this.state.players.find((p) => p.id === id);
     if (!existing) {
       const roster = animalsForLevel(this.state.levelId);
+      if (this.state.hostUserId === null) this.state.hostUserId = id;
       this.state.players.push({
         id, username, x: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50, y: Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50,
         animalType: randomAnimal(roster), isHunter: false, isReady: false, isAlive: true, perk: "none", extraLifeUsed: false, connId: connectionId,
       });
+      logEvent("join", { roomId: this.roomId(), userId: id, isSolo: this.state.isSoloMode });
     } else {
       existing.isAlive = true; existing.isReady = false; existing.connId = connectionId;
       if (!isAnimalAllowed(existing.animalType, this.state.levelId)) existing.animalType = defaultAnimalForLevel(this.state.levelId);
+      if (this.state.phase === "PLAYING" || this.state.phase === "COUNTDOWN") {
+        logEvent("reconnect", { roomId: this.roomId(), userId: id });
+      }
     }
     this.broadcastState();
   }
@@ -778,6 +861,15 @@ export class GameRoomDurableObject implements DurableObject {
     const player = this.state.players.find((p) => p.id === id);
     if (player && closingConnId && player.connId && player.connId !== closingConnId) return;
     this.state.players = this.state.players.filter((p) => p.id !== id);
+    logEvent("leave", { roomId: this.roomId(), userId: id });
+
+    // Host transfer: if the host left and humans remain, promote the first human.
+    if (this.state.hostUserId === id) {
+      const nextHost = this.state.players.find((p) => !p.isBot);
+      this.state.hostUserId = nextHost ? nextHost.id : null;
+      if (nextHost) this.state.eventLog.unshift(`${nextHost.username} is now the host.`);
+    }
+
     if (this.state.isSoloMode) {
       const humansLeft = this.state.players.some((p) => !p.isBot);
       if (!humansLeft) { this.resetRoom(); this.broadcastState(); return; }
@@ -786,14 +878,24 @@ export class GameRoomDurableObject implements DurableObject {
       if (this.state.hunterId === id) this.endGame("animals", "Hunter disconnected!");
       else if (this.state.players.length < 2) this.endGame("animals", "Not enough players to continue!");
       else this.checkWinCondition();
+    } else if (this.state.phase === "COUNTDOWN") {
+      const humans = this.state.players.filter((p) => !p.isBot);
+      if (humans.length < 2 || !humans.every((p) => p.isReady)) {
+        this.state.phase = "LOBBY";
+        this.state.countdownEndsAt = null;
+        this.state.eventLog.unshift("Countdown canceled: not enough ready players.");
+        this.state.eventLog = this.state.eventLog.slice(0, 8);
+        this.broadcastState();
+      }
     }
     this.broadcastState();
   }
 
   tryStartMatch() {
     if (this.state.phase !== "LOBBY") return;
-    if (this.state.players.length < 2) return;
-    if (!this.state.players.every((p) => p.isReady)) return;
+    const humans = this.state.players.filter((p) => !p.isBot);
+    if (humans.length < 2) return;
+    if (!humans.every((p) => p.isReady)) return;
     const players = this.state.players;
     const hunterIndex = Math.floor(Math.random() * players.length);
     const hunterId = players[hunterIndex].id;
@@ -806,18 +908,34 @@ export class GameRoomDurableObject implements DurableObject {
     const animalCount = players.length - 1;
     this.state.ammo = animalCount * 10; this.state.maxAmmo = animalCount * 10;
     this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(players.length), animalsForLevel(this.state.levelId));
-    this.state.phase = "PLAYING"; this.state.timeRemaining = this.state.matchDuration; this.state.matchStartTime = Date.now();
+    // Server-owned synchronized countdown before gameplay begins.
+    this.state.phase = "COUNTDOWN";
+    this.state.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+    this.state.timeRemaining = this.state.matchDuration;
     this.state.winner = null; this.rewardsGranted = false; this.hunterTagCount = 0;
-    this.state.eventLog = [`Match started! ${animalCount} animal(s) hiding.`];
-    this.startSyncLoop(); this.startCountdown();
+    this.state.eventLog = [`Get ready! ${animalCount} animal(s) hiding.`];
+    logEvent("match_start", { roomId: this.roomId(), playerCount: humans.length, levelId: this.state.levelId });
+    this.broadcastState();
+    this.startCountdown();
+  }
+
+  private beginPlaying() {
+    if (this.state.phase !== "COUNTDOWN") return;
+    this.state.phase = "PLAYING";
+    this.state.countdownEndsAt = null;
+    this.state.matchStartTime = Date.now();
     this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
+    this.startSyncLoop();
   }
 
   handleShoot(payload: any) {
     if (this.state.phase !== "PLAYING") return;
     const { targetX, targetY } = payload || {};
     if (typeof targetX !== "number" || typeof targetY !== "number") return;
+    if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
+    if (targetX < 0 || targetX > WORLD_SIZE || targetY < 0 || targetY > WORLD_SIZE) return;
     if (this.state.ammo <= 0) return;
+    this.state.ammo -= 1;
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
       if (p.isHunter || !p.isAlive) continue;
@@ -843,7 +961,6 @@ export class GameRoomDurableObject implements DurableObject {
       this.broadcast({ type: "HIT", payload: { targetId: hitPlayer.id, targetX, targetY, hit: true } });
       this.checkWinCondition();
     } else {
-      this.state.ammo -= 1;
       this.state.eventLog.unshift(`Hunter missed! ${this.state.ammo} ammo left.`);
       this.state.eventLog = this.state.eventLog.slice(0, 8);
       this.broadcast({ type: "HIT", payload: { targetId: null, targetX, targetY, hit: false } });
@@ -863,6 +980,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.eventLog = this.state.eventLog.slice(0, 10);
     this.stopLoops();
     this.grantMatchRewards(winner);
+    logEvent("match_end", { roomId: this.roomId(), winner, reason, isSolo: this.state.isSoloMode });
     this.broadcast({ type: "GAME_OVER", payload: { winner, reason, state: this.serializeState() } });
     setTimeout(() => { this.resetRoom(); this.broadcastState(); }, 5000);
   }
@@ -975,6 +1093,15 @@ export class GameRoomDurableObject implements DurableObject {
   startCountdown() {
     if (this.countdownInterval) clearInterval(this.countdownInterval);
     this.countdownInterval = setInterval(() => {
+      if (this.state.phase === "COUNTDOWN") {
+        // Keep broadcasting the synchronized countdown so every client sees the
+        // same 3 → 2 → 1 → HIDE! sequence derived from server time.
+        this.broadcastState();
+        if (this.state.countdownEndsAt !== null && Date.now() >= this.state.countdownEndsAt) {
+          this.beginPlaying();
+        }
+        return;
+      }
       if (this.state.phase !== "PLAYING") return;
       const elapsed = (Date.now() - this.state.matchStartTime) / 1000;
       if (elapsed >= this.state.matchDuration) { this.state.timeRemaining = 0; this.endGame("animals", "Time expired! Animals survived!"); return; }
@@ -989,7 +1116,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.stopLoops();
     this.state.phase = "LOBBY"; this.state.hunterId = null; this.state.ammo = 0; this.state.maxAmmo = 0;
     this.state.timeRemaining = this.state.matchDuration; this.state.winner = null; this.state.npcSeeds = [];
-    this.state.eventLog = []; this.state.isSoloMode = false;
+    this.state.eventLog = []; this.state.isSoloMode = false; this.state.countdownEndsAt = null;
     this.state.players = this.state.players.filter((p) => !p.isBot);
     this.state.players.forEach((p) => { p.isHunter = false; p.isReady = false; p.isAlive = true; p.perk = "none"; p.extraLifeUsed = false; });
   }
@@ -999,10 +1126,12 @@ export class GameRoomDurableObject implements DurableObject {
       players: this.state.players.map((p) => ({
         id: p.id, username: p.username, x: p.x, y: p.y, animalType: p.animalType, isHunter: p.isHunter,
         isReady: p.isReady, isAlive: p.isAlive, perk: p.perk, extraLifeUsed: p.extraLifeUsed, isBot: p.isBot ?? false,
+        connectionStatus: "connected" as const, joinedAt: this.state.createdAt, lastSeenAt: Date.now(),
       })),
       npcSeeds: this.state.npcSeeds, hunterId: this.state.hunterId, ammo: this.state.ammo, maxAmmo: this.state.maxAmmo,
       timeRemaining: this.state.timeRemaining, matchDuration: this.state.matchDuration, winner: this.state.winner,
       eventLog: this.state.eventLog, levelId: this.state.levelId,
+      hostUserId: this.state.hostUserId, maxPlayers: this.state.maxPlayers, countdownEndsAt: this.state.countdownEndsAt,
     };
   }
   broadcast(msg: ServerMessage) {
@@ -1042,30 +1171,45 @@ export class GameRoomDurableObject implements DurableObject {
     const animalCount = this.state.players.filter((p) => !p.isHunter).length;
     this.state.ammo = animalCount * 10; this.state.maxAmmo = animalCount * 10;
     this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length), animalsForLevel(this.state.levelId));
-    this.state.phase = "PLAYING"; this.state.timeRemaining = this.state.matchDuration; this.state.matchStartTime = Date.now();
     this.state.winner = null; this.state.isSoloMode = true; this.rewardsGranted = false; this.hunterTagCount = 0;
     this.state.eventLog = [finalRole === "hunter" ? `Solo practice: You are the Hunter. Find the ${animalCount} AI animals!` : `Solo practice: You are an Animal. Survive the AI Hunter!`];
-    this.startSyncLoop(); this.startCountdown();
-    this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
+    logEvent("solo_start", { roomId: this.roomId(), role: finalRole, botCount: this.state.players.length - 1 });
+    // Server-owned countdown before solo gameplay begins.
+    this.state.phase = "COUNTDOWN";
+    this.state.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+    this.state.timeRemaining = this.state.matchDuration;
+    this.broadcastState();
+    this.startCountdown();
   }
   updateBots(nowMs: number) {
     for (const p of this.state.players) { if (!p.isBot || !p.isAlive) continue; if (p.isHunter) this.updateBotHunter(p, nowMs); else this.updateBotAnimal(p, nowMs); }
   }
   updateBotAnimal(bot: PlayerState, nowMs: number) {
+    const lastUpdate = bot.botLastUpdate ?? nowMs;
+    const dt = Math.min((nowMs - lastUpdate) / 1000, 0.1);
+    bot.botLastUpdate = nowMs;
+
     const lastDecision = bot.botLastDecision ?? 0;
     if (nowMs - lastDecision > 900 + Math.random() * 2300) {
       bot.botLastDecision = nowMs;
       const angle = Math.random() * Math.PI * 2;
       const speed = 3.0 + Math.random() * 0.6;
-      bot.botVx = Math.cos(angle) * speed; bot.botVy = Math.sin(angle) * speed;
+      bot.botVx = Math.cos(angle) * speed;
+      bot.botVy = Math.sin(angle) * speed;
       if (Math.random() < 0.10) { bot.botVx = 0; bot.botVy = 0; }
     }
-    const vx = bot.botVx ?? 0; const vy = bot.botVy ?? 0;
-    bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + vx)); bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + vy));
+    const vx = bot.botVx ?? 0;
+    const vy = bot.botVy ?? 0;
+    bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + vx * dt));
+    bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + vy * dt));
     if (bot.x <= 60 || bot.x >= WORLD_SIZE - 60) bot.botVx = -(bot.botVx ?? 0);
     if (bot.y <= 60 || bot.y >= WORLD_SIZE - 60) bot.botVy = -(bot.botVy ?? 0);
   }
   updateBotHunter(bot: PlayerState, nowMs: number) {
+    const lastUpdate = bot.botLastUpdate ?? nowMs;
+    const dt = Math.min((nowMs - lastUpdate) / 1000, 0.1);
+    bot.botLastUpdate = nowMs;
+
     const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive);
     if (targets.length === 0) return;
     let nearest = targets[0]; let nearestDist = Infinity;
@@ -1079,15 +1223,15 @@ export class GameRoomDurableObject implements DurableObject {
         bot.botPatrolY = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.sin(angle) * range));
       }
     }
-    const PATROL_SPEED = 1.8; const CHASE_SPEED = 2.4;
+    const PATROL_SPEED = 180; const CHASE_SPEED = 240;
     let moveX: number, moveY: number, moveDist: number, speed: number;
     if (bot.botPatrolling) {
       const px = bot.botPatrolX ?? WORLD_SIZE / 2; const py = bot.botPatrolY ?? WORLD_SIZE / 2;
       moveX = px - bot.x; moveY = py - bot.y; moveDist = Math.hypot(moveX, moveY); speed = PATROL_SPEED;
     } else { moveX = nearest.x - bot.x; moveY = nearest.y - bot.y; moveDist = nearestDist; speed = CHASE_SPEED; }
     if (moveDist > 15) {
-      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (moveX / moveDist) * speed));
-      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed));
+      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (moveX / moveDist) * speed * dt));
+      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed * dt));
     }
     const SHOOT_RANGE = 260; const lastShot = bot.botLastShot ?? 0;
     if (!bot.botPatrolling && nearestDist < SHOOT_RANGE && nowMs - lastShot > 3000) {
@@ -1430,8 +1574,13 @@ export default {
       return stub.fetch(request);
     }
 
-    // Default: realtime match room.
-    const roomId = url.searchParams.get("room") || "lobby";
+    // Default: realtime match room. A room id is REQUIRED — we no longer fall
+    // back to a shared global "lobby". Clients must create/join explicitly.
+    const roomId = url.searchParams.get("room");
+    if (!roomId) {
+      logEvent("protocol_rejection", { reason: "room_required" });
+      return new Response(JSON.stringify({ error: "room_required", detail: "Connect with an explicit ?room=<ROOM_ID> parameter." }), { status: 400, headers: JSON_HEADERS });
+    }
     const id = env.GAME_ROOM.idFromName(roomId);
     const stub = env.GAME_ROOM.get(id);
     return stub.fetch(request);
