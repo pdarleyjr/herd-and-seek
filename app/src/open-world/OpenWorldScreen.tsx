@@ -22,6 +22,8 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
     return p && (p.status === "active" || p.status === "complete");
   });
 
+  const profileReady = profile && profile.level > 0;
+
   return (
     <div className="relative w-dvw h-dvh overflow-hidden bg-[#caa869]">
       <OpenWorldCanvas
@@ -37,72 +39,94 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
         onClaimQuest={ow.claimQuest}
       />
 
-      {/* Exit button */}
-      <button
-        type="button"
-        onClick={() => { ow.leave(); onExit(); }}
-        aria-label="Leave the Savannah Reserve"
-        className="absolute z-30 top-3 left-3 px-3 py-2 rounded-lg bg-black/60 text-white text-sm font-bold active:scale-95 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        style={{ touchAction: "manipulation", top: "max(12px, env(safe-area-inset-top))" }}
-      >
-        ← Leave
-      </button>
-
-      {/* Top-left: quest tracker */}
+      {/* ── Top HUD: Leave | active quest | profile ── */}
       <div
-        className="absolute z-20 top-3 left-3 max-w-[46vw] bg-black/60 text-white rounded-xl p-3 text-xs sm:text-sm"
-        style={{ top: "max(12px, env(safe-area-inset-top))", left: "max(86px, calc(env(safe-area-inset-left) + 72px))" }}
+        className="absolute z-30 inset-x-0 flex items-start gap-2 pointer-events-none"
+        style={{ top: "max(12px, env(safe-area-inset-top))", paddingInline: "max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right))" }}
       >
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="font-bold text-[#7fff00]">Savannah Reserve</h3>
+        {/* Left: leave */}
+        <button
+          type="button"
+          onClick={() => { ow.leave(); onExit(); }}
+          aria-label="Leave the Savannah Reserve"
+          className="game-button game-button--danger pointer-events-auto shrink-0"
+        >
+          ← Leave
+        </button>
+
+        {/* Center: active quest chip */}
+        <div className="pointer-events-auto flex-1 min-w-0">
+          {!ow.connected ? (
+            <div className="game-panel inline-flex items-center gap-2 px-3 py-2 pointer-events-auto" role="status" aria-live="polite">
+              <span className="text-[#7fff00] font-bold text-sm">Savannah Reserve</span>
+              <span className="status-pill status-pill--muted">Connecting…</span>
+            </div>
+          ) : activeQuests.length === 0 ? (
+            <div className="game-panel inline-flex items-center gap-2 px-3 py-2 pointer-events-auto">
+              <span className="text-[#7fff00] font-bold text-sm">Savannah Reserve</span>
+              <span className="text-xs text-gray-300">Go to the lodge to accept quests.</span>
+            </div>
+          ) : (
+            <div
+              className="game-panel inline-flex flex-col gap-1 px-3 py-2 max-w-full pointer-events-auto"
+              role="status"
+              aria-live="polite"
+            >
+              {activeQuests.map((q) => {
+                const p = questProgress[q.id];
+                const pct = Math.min(100, Math.round((p.progress / p.targetCount) * 100));
+                const done = p.status === "complete";
+                return (
+                  <div key={q.id} className="min-w-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`font-bold text-sm truncate ${done ? "text-[#7fff00]" : "text-[#f7ecd2]"}`}>{q.title}</span>
+                      <span className="text-xs text-gray-300 tabular-nums shrink-0">{p.progress}/{p.targetCount}</span>
+                    </div>
+                    <div className="progress" style={{ background: "rgba(0,0,0,0.4)" }}>
+                      <div className="progress__fill" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Right: profile + quest toggle */}
+        <div className="pointer-events-auto flex items-center gap-2 shrink-0">
+          <div
+            className="game-panel flex items-center gap-3 px-3 py-2"
+            aria-live="polite"
+            aria-label={`Profile level ${profileReady ? profile.level : "loading"}, ${profile?.coins ?? 0} coins, ${profile?.badges ?? 0} badges`}
+          >
+            {profileReady ? (
+              <>
+                <span className="font-bold text-sm">Lv {profile.level}</span>
+                <span className="text-[#ffcf33] text-sm">🪙 {profile.coins}</span>
+                <span className="text-[#ffd84d] text-sm">🏅 {profile.badges}</span>
+              </>
+            ) : (
+              <span className="status-pill status-pill--muted">
+                {ow.connected ? "Loading profile…" : "Offline"}
+              </span>
+            )}
+          </div>
           <button
-            onPointerDown={(e) => { e.preventDefault(); setDrawerOpen((v) => !v); }}
-            className="ml-2 px-2 py-0.5 rounded bg-white/15 text-[10px] active:scale-95 select-none"
+            type="button"
+            onClick={() => setDrawerOpen((v) => !v)}
+            aria-expanded={drawerOpen}
+            aria-label="Toggle quest list"
+            className="game-button shrink-0"
           >
             {drawerOpen ? "Hide" : "Quests"}
           </button>
         </div>
-        {!ow.connected && <p className="text-[#ffb4b4] text-[10px]">Connecting…</p>}
-        {activeQuests.length === 0 && ow.connected && (
-          <p className="text-gray-300 text-[10px]">Go to the lodge to accept quests.</p>
-        )}
-        <div className="space-y-1 mt-1">
-          {activeQuests.map((q) => {
-            const p = questProgress[q.id];
-            const pct = Math.min(100, Math.round((p.progress / p.targetCount) * 100));
-            const done = p.status === "complete";
-            return (
-              <div key={q.id}>
-                <div className="flex justify-between">
-                  <span className={done ? "text-[#7fff00]" : ""}>{q.title}</span>
-                  <span className="text-gray-300">{p.progress}/{p.targetCount}</span>
-                </div>
-                <div className="h-1 bg-white/15 rounded overflow-hidden">
-                  <div className="h-full bg-[#7fff00]" style={{ width: `${pct}%` }} />
-                </div>
-                {done && (
-                  <span className="text-[10px] text-[#7fff00]">Ready to claim at the lodge</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Top-right: profile summary */}
-      <div
-        className="absolute z-20 top-3 right-3 bg-black/60 text-white rounded-xl px-3 py-2 text-xs sm:text-sm flex gap-3"
-        style={{ top: "max(12px, env(safe-area-inset-top))", right: "max(12px, env(safe-area-inset-right))" }}
-      >
-        <span className="font-bold">Lv {profile?.level ?? "?"}</span>
-        <span className="text-[#ffcf33]">🪙 {profile?.coins ?? 0}</span>
-        <span className="text-[#ffd84d]">🏅 {profile?.badges ?? 0}</span>
-      </div>
-
-      {/* Reward toasts */}
-      <div className="absolute z-20 top-20 right-3 space-y-1">
+      {/* Reward toasts (live) */}
+      <div className="absolute z-20 top-20 right-3 space-y-1 pointer-events-none" aria-live="polite">
         {ow.rewards.slice(0, 3).map((r, i) => (
-          <div key={i} className="bg-[#7fff00]/90 text-black rounded-lg px-3 py-1 text-xs font-bold">
+          <div key={i} className="game-panel px-3 py-1 text-xs font-bold text-black bg-[#7fff00]">
             +{r.coins}c +{r.xp}xp{r.badges ? ` +${r.badges}b` : ""}
           </div>
         ))}
@@ -110,7 +134,7 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
 
       {/* Connection / error banner */}
       {ow.error && (
-        <div className="absolute z-20 bottom-24 left-1/2 -translate-x-1/2 bg-red-600/90 text-white text-xs px-3 py-1 rounded-full">
+        <div className="absolute z-20 bottom-24 left-1/2 -translate-x-1/2 bg-red-600/90 text-white text-xs px-3 py-1 rounded-full" role="alert">
           {ow.error.message}
         </div>
       )}
@@ -118,10 +142,12 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
       {/* Collapsible quest drawer */}
       {drawerOpen && (
         <div
-          className="absolute z-30 inset-x-2 bottom-2 bg-black/80 text-white rounded-2xl p-3 max-h-[55vh] overflow-y-auto"
+          className="absolute z-30 inset-x-2 bottom-2 game-panel p-3 max-h-[55vh] overflow-y-auto"
           style={{ bottom: "max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px))" }}
+          role="dialog"
+          aria-label="All quests"
         >
-          <h3 className="font-bold text-[#7fff00] mb-2">All Quests</h3>
+          <h3 className="game-panel__title mb-2">All Quests</h3>
           <div className="space-y-2">
             {QUEST_CATALOG.map((q) => {
               const p = questProgress[q.id];

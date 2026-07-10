@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./ui/ui.css";
 
 /* Safe-area variables for notch / home-indicator aware layouts. */
 :root {

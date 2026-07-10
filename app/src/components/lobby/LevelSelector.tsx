@@ -1,5 +1,6 @@
 import type { LevelId } from "../../types";
 import { LEVELS, LEVEL_ORDER, ANIMAL_DEFS } from "../../types";
+import AnimalThumb from "../../ui/AnimalThumb";
 
 interface LevelSelectorProps {
   selectedLevel: LevelId;
@@ -28,7 +29,7 @@ export default function LevelSelector({
         <span className="text-[#9a7a3a] text-[10px]">{LEVEL_ORDER.length} maps</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {LEVEL_ORDER.map((id) => {
           const level = LEVELS[id];
           const active = selectedLevel === id;
@@ -103,12 +104,7 @@ export default function LevelSelector({
                       }}
                     >
                       {isPng ? (
-                        <img
-                          src={`/assets/${a}.png`}
-                          alt={def.label}
-                          className="w-5 h-5 object-contain"
-                          style={{ imageResolution: "pixelated", imageRendering: "pixelated" }}
-                        />
+                        <AnimalThumb animal={a} size={20} className="w-5 h-5" />
                       ) : (
                         <span style={{ fontSize: 14, lineHeight: 1 }}>{def.emoji}</span>
                       )}

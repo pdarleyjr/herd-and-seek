@@ -7,12 +7,25 @@ import {
   DISTRICTS,
   OPEN_WORLD_WORLD_SIZE,
 } from "./openWorldTypes";
-import { drawWorld, drawMinimap, type Camera } from "./openWorldRenderer";
+import {
+  drawWorld,
+  drawMinimap,
+  type Camera,
+  type Particle,
+  type QualityTier,
+} from "./openWorldRenderer";
 import { joystickVector, resolveContextAction, type ContextAction } from "./openWorldControls";
 
 const LODGE = DISTRICTS.find((d) => d.id === "lodge")!;
 const SYNC_INTERVAL_MS = 66; // ~15 Hz, matching the server broadcast rate.
-const MOVE_SPEED = 4; // world units per frame at scale 1
+const MOVE_SPEED = 320; // world units per second (frame-rate independent).
+
+function qualityFor(width: number, reducedMotion: boolean): QualityTier {
+  if (reducedMotion) return "balanced";
+  if (width < 640) return "balanced";
+  if (width < 1100) return "balanced";
+  return "high";
+}
 
 interface OpenWorldCanvasProps {
   userId: string;
@@ -47,6 +60,7 @@ export default function OpenWorldCanvas({
   const joyCurrent = useRef<{ x: number; y: number } | null>(null);
   const keys = useRef<Record<string, boolean>>({});
   const lastSync = useRef(0);
+  const particlesRef = useRef<Particle[]>([]);
   const [contextAction, setContextAction] = useState<ContextAction | null>(null);
   const [usingTouch, setUsingTouch] = useState(false);
   const [joyKnob, setJoyKnob] = useState({ x: 0, y: 0 });
@@ -72,6 +86,16 @@ export default function OpenWorldCanvas({
     }
   }, [zoneState, userId]);
 
+  const spawnBurst = (x: number, y: number, text?: string) => {
+    const arr = particlesRef.current;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      arr.push({ x, y, kind: "spark", age: 0, ttl: 0.6, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60 - 30 });
+    }
+    if (text) arr.push({ x, y: y - 20, kind: "text", text, color: "#ffcf33", age: 0, ttl: 1.1, vx: 0, vy: -40 });
+    if (arr.length > 200) arr.splice(0, arr.length - 200);
+  };
+
   // Main render + movement loop (runs once).
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -80,9 +104,16 @@ export default function OpenWorldCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     let raf = 0;
+    let prev = performance.now();
+
     const render = (time: number) => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dt = Math.min((time - prev) / 1000, 0.05);
+      prev = time;
+
+      const dprCap = qualityFor(container.clientWidth, reducedMotion) === "high" ? 2 : 1.5;
+      const dpr = Math.min(window.devicePixelRatio || 1, dprCap);
       const w = container.clientWidth;
       const h = container.clientHeight;
       if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
@@ -107,18 +138,19 @@ export default function OpenWorldCanvas({
         const dx = target.current.x - localPos.current.x;
         const dy = target.current.y - localPos.current.y;
         const d = Math.hypot(dx, dy);
-        if (d < MOVE_SPEED) {
+        const step = MOVE_SPEED * dt;
+        if (d <= step) {
           localPos.current = { x: target.current.x, y: target.current.y };
           target.current = null;
         } else {
-          mx += (dx / d) * 0.6;
-          my += (dy / d) * 0.6;
+          mx += (dx / d) * 0.8;
+          my += (dy / d) * 0.8;
         }
       }
 
       const mlen = Math.hypot(mx, my);
       if (mlen > 0.001) {
-        const speed = MOVE_SPEED * (mlen > 1 ? 1 : mlen);
+        const speed = MOVE_SPEED * (mlen > 1 ? 1 : mlen) * dt;
         localPos.current.x = Math.max(40, Math.min(OPEN_WORLD_WORLD_SIZE - 40, localPos.current.x + (mx / mlen) * speed));
         localPos.current.y = Math.max(40, Math.min(OPEN_WORLD_WORLD_SIZE - 40, localPos.current.y + (my / mlen) * speed));
         if (time - lastSync.current > SYNC_INTERVAL_MS) {
@@ -127,10 +159,32 @@ export default function OpenWorldCanvas({
         }
       }
 
+      // Advance particles.
+      const parts = particlesRef.current;
+      for (const p of parts) {
+        p.age += dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 120 * dt;
+      }
+      for (let i = parts.length - 1; i >= 0; i--) if (parts[i].age >= parts[i].ttl) parts.splice(i, 1);
+
       const zone = zoneRef.current;
       if (zone) {
-        drawWorld(ctx, cam, zone, userId, time);
-        drawMinimap(ctx, w - 180, h - 180, 160, 160, zone, userId);
+        const quality = qualityFor(w, reducedMotion);
+        drawWorld(ctx, cam, zone, {
+          time,
+          localId: userId,
+          quality,
+          particles: parts,
+          reducedMotion,
+        });
+
+        // Minimap sits ABOVE the reserved bottom-right action zone (no overlap).
+        const mSize = w < 640 ? 122 : 190;
+        const margin = 14;
+        const actionZoneH = 96;
+        drawMinimap(ctx, w - mSize - margin, h - mSize - margin - actionZoneH, mSize, mSize, zone, userId);
 
         const action = resolveContextAction({
           zone,
@@ -191,7 +245,10 @@ export default function OpenWorldCanvas({
     if (!contextAction) return;
     switch (contextAction.kind) {
       case "collect":
-        if (contextAction.nodeId) onCollectNode(contextAction.nodeId);
+        if (contextAction.nodeId) {
+          onCollectNode(contextAction.nodeId);
+          spawnBurst(localPos.current.x, localPos.current.y, "Collected!");
+        }
         break;
       case "accept":
         if (contextAction.questId) onAcceptQuest(contextAction.questId);
@@ -207,20 +264,22 @@ export default function OpenWorldCanvas({
     }
   };
 
+  const safeBottom = "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))";
+  const safeLeft = "max(16px, env(safe-area-inset-left))";
+  const safeRight = "max(16px, env(safe-area-inset-right))";
+
   return (
     <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-[#caa869]" style={{ touchAction: "none" }}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
       {/* Virtual joystick (bottom-left) */}
-      <div
-        className="absolute z-20"
-        style={{ left: "max(16px, env(safe-area-inset-left))", bottom: "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))" }}
-      >
+      <div className="absolute z-20" style={{ left: safeLeft, bottom: safeBottom }}>
         <div
           onPointerDown={onJoyStart}
           onPointerMove={onJoyMove}
           onPointerUp={onJoyEnd}
           onPointerCancel={onJoyEnd}
+          onLostPointerCapture={onJoyEnd}
           className="w-28 h-28 rounded-full bg-black/30 border-2 border-white/40 flex items-center justify-center touch-none select-none"
           style={{ touchAction: "none" }}
         >
@@ -231,16 +290,13 @@ export default function OpenWorldCanvas({
         </div>
       </div>
 
-      {/* Context action button (bottom-right) */}
+      {/* Context action button (bottom-right), never overlapping the minimap */}
       {contextAction && (
-        <div
-          className="absolute z-20"
-          style={{ right: "max(16px, env(safe-area-inset-right))", bottom: "max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))" }}
-        >
+        <div className="absolute z-20" style={{ right: safeRight, bottom: safeBottom }}>
           <button
-            onPointerDown={(e) => { e.preventDefault(); handleAction(); }}
-            className="px-5 py-4 rounded-2xl font-bold text-black text-sm sm:text-base bg-[#7fff00] active:scale-95 select-none min-h-[56px]"
-            style={{ touchAction: "manipulation" }}
+            type="button"
+            onClick={handleAction}
+            className="game-button game-button--primary min-h-[56px] px-5 py-4 text-sm sm:text-base"
           >
             {contextAction.label}
           </button>
@@ -248,12 +304,11 @@ export default function OpenWorldCanvas({
       )}
 
       {!usingTouch && (
-        <div className="absolute z-10 bottom-3 left-1/2 -translate-x-1/2 text-white/70 text-xs bg-black/40 px-3 py-1 rounded-full">
+        <div className="absolute z-10 bottom-3 left-1/2 -translate-x-1/2 text-white/70 text-xs bg-black/40 px-3 py-1 rounded-full pointer-events-none">
           WASD / Arrows to move · walk to collectibles &amp; the lodge
         </div>
       )}
 
-      {/* `profile` and `username` are part of the canvas props for future HUD hooks */}
       <span className="hidden">{username}{profile ? profile.level : ""}</span>
     </div>
   );

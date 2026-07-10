@@ -9,9 +9,10 @@ import PlayerStatusBar from "./PlayerStatusBar";
 import ReadyButton from "./ReadyButton";
 import HowToPlayModal from "./HowToPlayModal";
 import PortraitLobby from "./PortraitLobby";
+import AnimalThumb from "../../ui/AnimalThumb";
 import { useViewportInfo } from "../../hooks/useViewportInfo";
 import type { SerializedState, AnimalType, PerkType, LevelId } from "../../types";
-import { LEVELS, animalsForLevel } from "../../types";
+import { LEVELS, ANIMAL_DEFS, animalsForLevel } from "../../types";
 
 const DURATION_PRESETS = [
   { label: "30s", seconds: 30 },
@@ -58,6 +59,7 @@ export default function LobbyScene({
   onOpenWorld,
 }: LobbySceneProps) {
   const { layoutMode, isPhone } = useViewportInfo();
+  const [soloOpen, setSoloOpen] = useState(false);
 
   const me = gameState?.players.find((p) => p.id === userId);
   const isReady = me?.isReady ?? false;
@@ -87,52 +89,48 @@ export default function LobbyScene({
         onReady={onReady}
         onStartSolo={onStartSolo}
         onSoloWithBots={onSoloWithBots}
+        onOpenWorld={onOpenWorld}
         compact={isPhone || layoutMode === "tablet-portrait"}
       />
     );
   }
 
+  const level = LEVELS[selectedLevel];
+  const animalDef = ANIMAL_DEFS[selectedAnimal];
+  const biomeTint =
+    level.biome === "ocean"
+      ? "radial-gradient(120% 80% at 50% 0%, rgba(57,192,230,0.25), transparent 60%)"
+      : level.biome === "savannah"
+        ? "radial-gradient(120% 80% at 50% 0%, rgba(240,168,58,0.25), transparent 60%)"
+        : "radial-gradient(120% 80% at 50% 0%, rgba(127,255,0,0.18), transparent 60%)";
+
   return (
     <div className="relative w-dvw h-dvh overflow-hidden select-none" style={{ touchAction: "none" }}>
-      {/* Animated canvas background */}
       <LobbyBackground />
 
-      {/* ── Layout Grid ── */}
       <div
-        className="absolute inset-0 grid pointer-events-none"
+        className="absolute inset-0 grid gap-3 p-3 sm:p-4"
         style={{
-          gridTemplateColumns: "minmax(0,2fr) minmax(0,3fr) minmax(0,2fr)",
-          gridTemplateRows: "auto 1fr auto auto",
-          gap: isLandscapeTablet ? "10px" : "12px",
-          padding: isLandscapeTablet ? "12px" : "14px",
-          zIndex: 1,
+          gridTemplateAreas: `"header header header" "setup preview upgrades" "footer footer footer"`,
+          gridTemplateColumns: isLandscapeTablet
+            ? "minmax(240px,300px) minmax(280px,1fr) minmax(240px,300px)"
+            : "minmax(280px,340px) minmax(320px,1fr) minmax(300px,360px)",
+          gridTemplateRows: "auto minmax(0,1fr) auto",
+          minHeight: 0,
         }}
       >
-        {/* TOP-LEFT: Logo */}
-        <div className="pointer-events-auto flex items-start">
+        {/* Header: logo + profile */}
+        <header className="flex items-start justify-between gap-3" style={{ gridArea: "header" }}>
           <HerdSeekLogo />
-        </div>
+          <PlayerStatusBar username={username} gameState={gameState} userId={userId} connected={connected} />
+        </header>
 
-        {/* TOP-CENTER: empty (tree is absolute below) */}
-        <div />
-
-        {/* TOP-RIGHT: Status bar */}
-        <div className="pointer-events-auto flex items-start justify-end">
-          <PlayerStatusBar
-            username={username}
-            gameState={gameState}
-            userId={userId}
-            connected={connected}
-          />
-        </div>
-
-        {/* MID-LEFT: Morphs panel */}
-        <div className="pointer-events-auto flex flex-col gap-2" style={{ minHeight: 0 }}>
-          <LevelSelector
-            selectedLevel={selectedLevel}
-            onSelectLevel={onSelectLevel}
-            disabled={inGame}
-          />
+        {/* Setup rail */}
+        <section
+          className="flex flex-col gap-3 min-h-0 overflow-y-auto scroll-area"
+          style={{ gridArea: "setup" }}
+        >
+          <LevelSelector selectedLevel={selectedLevel} onSelectLevel={onSelectLevel} disabled={inGame} />
           <MorphPanel
             selected={selectedAnimal}
             onSelect={onSelectAnimal}
@@ -140,85 +138,84 @@ export default function LobbyScene({
             allowedAnimals={allowedAnimals}
             levelId={selectedLevel}
           />
-        </div>
+        </section>
 
-        {/* MID-CENTER: empty (tree is absolute) */}
-        <div />
-
-        {/* MID-RIGHT: Upgrades panel */}
-        <div className="pointer-events-auto" style={{ minHeight: 0 }}>
-          <UpgradePanel
-            selected={selectedPerk}
-            onSelect={onSelectPerk}
-            disabled={inGame}
-          />
-        </div>
-
-        {/* BOTTOM-LEFT: Player list + solo + how to play */}
-        <div className="pointer-events-auto flex flex-col items-start gap-2 justify-end">
-          <div className="w-full max-w-[220px]">
-            <HowToPlayModal />
-          </div>
-          {onStartSolo && playerCount < 2 && (
-            <SoloBotSelector onStartSolo={onStartSolo} onSoloWithBots={onSoloWithBots} />
+        {/* Center preview */}
+        <section
+          className="game-panel relative flex flex-col items-center justify-center text-center overflow-hidden min-h-0 p-4"
+          style={{ gridArea: "preview", background: `linear-gradient(180deg,#2e1a08,#160c05), ${biomeTint}` }}
+        >
+          {level.biome === "forest" && (
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 opacity-50 pointer-events-none" style={{ width: "clamp(120px,18vw,240px)" }}>
+              <SvgTree className="w-full h-auto" />
+            </div>
           )}
-          {onOpenWorld && (
+          <div className="relative mb-2">
+            <AnimalThumb animal={selectedAnimal} size={160} animated />
+          </div>
+          <h2 className="relative text-xl font-extrabold text-[#f5d07a]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.6)" }}>
+            {animalDef?.label ?? selectedAnimal}
+          </h2>
+          <p className="relative text-sm text-[#d8c39a] max-w-[38ch]">{animalDef?.description}</p>
+          <div className="relative mt-3 status-pill status-pill--ok">{level.displayName}</div>
+        </section>
+
+        {/* Upgrades rail */}
+        <section className="min-h-0 min-w-0" style={{ gridArea: "upgrades" }}>
+          <UpgradePanel selected={selectedPerk} onSelect={onSelectPerk} disabled={inGame} />
+        </section>
+
+        {/* Footer: party | mode | action */}
+        <footer className="flex items-end gap-3" style={{ gridArea: "footer", minHeight: 0 }}>
+          {/* Left: party + help */}
+          <div className="flex items-end gap-2 flex-wrap min-w-0">
+            <HowToPlayModal />
+            <PlayerList gameState={gameState} userId={userId} />
+          </div>
+
+          {/* Center: primary entry points */}
+          <div className="mx-auto flex items-center gap-2 flex-wrap justify-center">
+            <ReadyButton
+              isReady={isReady}
+              canStart={canStart}
+              allReady={allReady}
+              playerCount={playerCount}
+              onReady={onReady}
+              isHost={me?.id === gameState?.players[0]?.id}
+            />
             <button
               type="button"
-              onClick={() => onOpenWorld()}
-              aria-label="Enter the Savannah Reserve open world"
-              className="w-full max-w-[220px] py-2 rounded-xl font-bold text-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7fe0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1f6a8c]"
-              style={{
-                background: "linear-gradient(180deg,#3aa0d0,#1f6a8c)",
-                border: "2px solid #7fe0ff",
-                color: "#fff",
-                touchAction: "manipulation",
-              }}
-              title="Roam the Savannah Reserve, complete quests, collect coins, and upgrade your profile."
+              onClick={() => setSoloOpen((v) => !v)}
+              aria-expanded={soloOpen}
+              className={`game-button game-button--gold ${soloOpen ? "is-selected" : ""}`}
             >
-              🌍 Open World
+              🎮 Solo vs AI
             </button>
-          )}
-          <PlayerList gameState={gameState} userId={userId} />
-        </div>
+            {onOpenWorld && (
+              <button
+                type="button"
+                onClick={() => onOpenWorld()}
+                className="game-button game-button--savannah min-h-[56px] px-5 text-base"
+              >
+                🌍 Open World
+              </button>
+            )}
+          </div>
 
-        {/* BOTTOM-CENTER: Ready button */}
-        <div className="pointer-events-auto flex items-end justify-center pb-2">
-          <ReadyButton
-            isReady={isReady}
-            canStart={canStart}
-            allReady={allReady}
-            playerCount={playerCount}
-            onReady={onReady}
-            isHost={me?.id === gameState?.players[0]?.id}
-          />
-        </div>
-
-        {/* BOTTOM-RIGHT: Game mode info + duration picker */}
-        <div className="pointer-events-auto flex items-end justify-end">
-          <GameModeInfo
-            matchDuration={gameState?.matchDuration ?? 120}
-            mapName={LEVELS[selectedLevel].displayName}
-            onSetDuration={onSetDuration}
-            disabled={inGame}
-          />
-        </div>
-      </div>
-
-      {/* Central tree — anchored to ground bottom, never floats into sky */}
-      {/* bottom:38% matches the ground-line in LobbyBackground canvas (~h*0.62 from top) */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          left: "50%",
-          bottom: isLandscapeTablet ? "36%" : "38%",
-          transform: "translateX(-50%)",
-          width: isLandscapeTablet ? "clamp(150px, 24vw, 320px)" : "clamp(160px, 26vw, 340px)",
-          zIndex: 0,
-          filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.4))",
-        }}
-      >
-        <SvgTree className="w-full h-auto" />
+          {/* Right: contextual controls */}
+          <div className="flex items-center gap-2 flex-wrap justify-end min-w-0">
+            {soloOpen ? (
+              <SoloBotSelector onStartSolo={onStartSolo} onSoloWithBots={onSoloWithBots} />
+            ) : (
+              <GameModeInfo
+                matchDuration={gameState?.matchDuration ?? 120}
+                mapName={level.displayName}
+                onSetDuration={onSetDuration}
+                disabled={inGame}
+              />
+            )}
+          </div>
+        </footer>
       </div>
     </div>
   );
@@ -237,20 +234,15 @@ function PlayerList({
   if (players.length === 0) return null;
 
   return (
-    <div
-      className="rounded-2xl border-2 border-[#8b5c1e] px-3 py-2 max-w-[220px] w-full"
-      style={{ background: "linear-gradient(135deg, #3d2210cc 0%, #1a0f05cc 100%)" }}
-    >
+    <div className="game-panel px-3 py-2 min-w-0">
       <div className="text-[#f5d07a] font-bold text-xs uppercase tracking-wider mb-1.5">
         Players ({players.length})
       </div>
-      <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+      <div className="flex flex-col gap-1 max-h-28 overflow-y-auto scroll-area">
         {players.map((p) => (
           <div key={p.id} className="flex items-center gap-2">
             <span className={`text-[10px] w-2 h-2 rounded-full inline-block ${p.isReady ? "bg-[#7fff00]" : "bg-[#888]"}`} />
-            <span
-              className={`text-xs truncate max-w-[130px] ${p.id === userId ? "text-[#7fff00] font-bold" : "text-[#e8c87a]"}`}
-            >
+            <span className={`text-xs truncate max-w-[130px] ${p.id === userId ? "text-[#7fff00] font-bold" : "text-[#e8c87a]"}`}>
               {p.username}{p.id === userId ? " (You)" : ""}
             </span>
             <span className="text-[10px] text-[#888] ml-auto">{p.isReady ? "✓" : "..."}</span>
@@ -287,7 +279,6 @@ function GameModeInfo({
   const isPreset = DURATION_PRESETS.some((p) => p.seconds === matchDuration);
 
   const applyCustom = () => {
-    // Accept "1:30", "90", "1m30s", "2m" etc.
     const raw = customInput.trim().toLowerCase();
     let total = 0;
     const mMatch = raw.match(/(\d+)\s*m(?:in)?/);
@@ -299,7 +290,6 @@ function GameModeInfo({
     } else if (mMatch || sMatch) {
       total = (mMatch ? parseInt(mMatch[1]) * 60 : 0) + (sMatch ? parseInt(sMatch[1]) : 0);
     } else if (plainMatch) {
-      // bare number: if <= 60 treat as minutes, else as seconds
       const n = parseInt(plainMatch[1]);
       total = n <= 60 ? n * 60 : n;
     }
@@ -311,11 +301,7 @@ function GameModeInfo({
   };
 
   return (
-    <div
-      className="rounded-2xl border-2 border-[#8b5c1e] px-3 py-2.5 text-right w-full"
-      style={{ background: "linear-gradient(135deg, #3d2210cc 0%, #1a0f05cc 100%)" }}
-    >
-      {/* Mode & Map rows */}
+    <div className="game-panel px-3 py-2 text-right">
       <div className="flex items-center gap-2 justify-end">
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Mode</span>
         <span className="text-[#f5d07a] text-xs font-bold">Stealth Hunt</span>
@@ -324,38 +310,26 @@ function GameModeInfo({
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Map</span>
         <span className="text-[#f5d07a] text-xs font-bold">{mapName}</span>
       </div>
-
-      {/* Time row — interactive */}
       <div className="mt-2 border-t border-[#6b3a0a] pt-2">
         <div className="flex items-center justify-end gap-2 mb-1.5">
           <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Match Time</span>
-          <span
-            className="text-[#f5d07a] text-sm font-extrabold tabular-nums"
-            style={{ fontVariantNumeric: "tabular-nums" }}
-          >
-            {fmt(matchDuration)}
-          </span>
+          <span className="text-[#f5d07a] text-sm font-extrabold tabular-nums">{fmt(matchDuration)}</span>
         </div>
-
         {!disabled && (
           <>
-            {/* Preset chips */}
             <div className="flex flex-wrap gap-1 justify-end mb-1.5">
               {DURATION_PRESETS.map((p) => {
                 const active = p.seconds === matchDuration;
                 return (
                   <button
                     key={p.seconds}
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      onSetDuration(p.seconds);
-                      setCustomMode(false);
-                    }}
+                    type="button"
+                    onClick={() => { onSetDuration(p.seconds); setCustomMode(false); }}
                     className={[
-                      "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none",
+                      "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none min-h-[28px]",
                       active
-                        ? "border-[#7fff00] bg-[#1a3a08] text-[#7fff00] shadow-[0_0_6px_rgba(127,255,0,0.35)]"
-                        : "border-[#6b3a0a] bg-[#2a1808]/80 text-[#e8c87a] hover:border-[#a07030] hover:text-[#f5d07a] active:scale-95",
+                        ? "border-[#7fff00] bg-[#1a3a08] text-[#7fff00]"
+                        : "border-[#6b3a0a] bg-[#2a1808]/80 text-[#e8c87a] hover:border-[#a07030]",
                     ].join(" ")}
                     style={{ touchAction: "manipulation" }}
                   >
@@ -363,14 +337,11 @@ function GameModeInfo({
                   </button>
                 );
               })}
-              {/* Custom button */}
               <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  setCustomMode((v) => !v);
-                }}
+                type="button"
+                onClick={() => setCustomMode((v) => !v)}
                 className={[
-                  "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none",
+                  "px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all duration-100 select-none min-h-[28px]",
                   !isPreset || customMode
                     ? "border-[#7fff00] bg-[#1a3a08] text-[#7fff00]"
                     : "border-[#6b3a0a] bg-[#2a1808]/80 text-[#e8c87a] hover:border-[#a07030]",
@@ -380,8 +351,6 @@ function GameModeInfo({
                 Custom
               </button>
             </div>
-
-            {/* Custom input row */}
             {customMode && (
               <div className="flex gap-1 justify-end items-center">
                 <input
@@ -395,23 +364,23 @@ function GameModeInfo({
                   style={{ touchAction: "manipulation" }}
                 />
                 <button
-                  onPointerDown={(e) => { e.preventDefault(); applyCustom(); }}
-                  className="px-2 py-1 rounded-lg bg-[#7fff00] text-black text-xs font-bold active:scale-95 select-none"
+                  type="button"
+                  onClick={applyCustom}
+                  className="px-2 py-1 rounded-lg bg-[#7fff00] text-black text-xs font-bold active:scale-95 select-none min-h-[28px]"
                   style={{ touchAction: "manipulation" }}
                 >
                   Set
                 </button>
               </div>
             )}
-<p className="text-[#6b4a2a] text-[10px] mt-1 text-right">30s – 60m allowed</p>
-           </>
+            <p className="text-[#6b4a2a] text-[10px] mt-1 text-right">30s – 60m allowed</p>
+          </>
         )}
-       </div>
-     </div>
-   );
- }
+      </div>
+    </div>
+  );
+}
 
-// ── Solo Bot Selector Component ──────────────────────────────────────────────
 function SoloBotSelector({
   onStartSolo,
   onSoloWithBots,
@@ -423,8 +392,7 @@ function SoloBotSelector({
   const [soloRole, setSoloRole] = useState<"hunter" | "animal" | "random">("random");
 
   return (
-    <div className="w-full max-w-[220px] flex flex-col gap-1">
-      {/* Bot count selector */}
+    <div className="game-panel p-3 flex flex-col gap-2 min-w-[220px]">
       <div className="flex items-center justify-between">
         <span className="text-[#c8a05a] text-xs font-semibold uppercase tracking-wide">Bots</span>
         <span className="text-[#f5d07a] text-sm font-bold">{botCount}</span>
@@ -433,8 +401,9 @@ function SoloBotSelector({
         {[2, 3, 4, 5, 6].map((n) => (
           <button
             key={n}
-            onPointerDown={(e) => { e.preventDefault(); setBotCount(n); }}
-            className="flex-1 py-0.5 rounded-lg text-xs font-bold border select-none"
+            type="button"
+            onClick={() => setBotCount(n)}
+            className="flex-1 py-1 rounded-lg text-xs font-bold border select-none min-h-[36px]"
             style={{
               borderColor: n === botCount ? "#7fff00" : "#5a3a1a",
               background: n === botCount ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
@@ -444,13 +413,13 @@ function SoloBotSelector({
           >{n}</button>
         ))}
       </div>
-      {/* Role selector */}
       <div className="flex gap-1 mt-1">
         {(["hunter", "random", "animal"] as const).map((r) => (
           <button
             key={r}
-            onPointerDown={(e) => { e.preventDefault(); setSoloRole(r); }}
-            className="flex-1 py-0.5 rounded-lg text-xs font-bold border select-none"
+            type="button"
+            onClick={() => setSoloRole(r)}
+            className="flex-1 py-1 rounded-lg text-xs font-bold border select-none min-h-[36px]"
             style={{
               borderColor: r === soloRole ? "#7fff00" : "#5a3a1a",
               background: r === soloRole ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",
@@ -460,16 +429,14 @@ function SoloBotSelector({
           >{r === "hunter" ? "🎯 H" : r === "animal" ? "🐾 A" : "🎲 ?"}</button>
         ))}
       </div>
-      {/* Play button */}
       <button
-        onPointerDown={(e) => {
-          e.preventDefault();
+        type="button"
+        onClick={() => {
           if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
           else if (onStartSolo) onStartSolo();
         }}
-        className="w-full py-1 rounded-xl font-bold text-sm select-none"
-        style={{ background: "linear-gradient(180deg,#d4a010,#a07808)", border: "2px solid #f5d07a", color: "#000", touchAction: "manipulation" }}
-      >🎮 Solo vs AI</button>
+        className="game-button game-button--gold w-full min-h-[44px]"
+      >🎮 Start Solo</button>
     </div>
   );
 }

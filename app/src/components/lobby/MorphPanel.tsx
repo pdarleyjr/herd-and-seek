@@ -1,4 +1,5 @@
 import WoodPanel from "./WoodPanel";
+import AnimalThumb from "../../ui/AnimalThumb";
 import type { AnimalType, LevelId } from "../../types";
 import { ANIMAL_DEFS } from "../../types";
 
@@ -33,7 +34,7 @@ export default function MorphPanel({
     : (["rabbit", "bear", "owl", "snake", "frog", "duck", "dog", "panda"] as AnimalType[]);
 
   return (
-    <WoodPanel title="Morphs" subtitle={levelSubtitle(levelId)} className="h-full">
+    <WoodPanel title="Morphs" subtitle={levelSubtitle(levelId)} className="shrink-0">
       <div className={`grid ${dense ? "grid-cols-2" : "grid-cols-3"} gap-2`}>
         {list.map((value) => {
           const def = ANIMAL_DEFS[value];
@@ -43,7 +44,7 @@ export default function MorphPanel({
               key={value}
               aria-pressed={isSelected}
               disabled={disabled}
-              onPointerDown={(e) => {
+              onClick={(e) => {
                 e.preventDefault();
                 if (!disabled) onSelect(value);
               }}
@@ -69,12 +70,7 @@ export default function MorphPanel({
                   {def.emoji}
                 </div>
               ) : (
-                <img
-                  src={`/assets/${value}.png`}
-                  alt={def.label}
-                  className="w-10 h-10 object-contain"
-                  style={{ imageRendering: "pixelated" }}
-                />
+                <AnimalThumb animal={value} size={40} className="w-10 h-10" />
               )}
               <span className="text-[10px] font-semibold text-[#e8c87a] leading-tight text-center">
                 {def.label}

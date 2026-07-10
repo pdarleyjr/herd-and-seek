@@ -1,0 +1,193 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Herd & Seek — UI design system
+   One panel language, one button hierarchy, one typography scale, one
+   focus ring. Reduced reliance on one-off inline styles.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --surface-1: rgba(28, 18, 8, 0.92);
+  --surface-2: rgba(20, 13, 5, 0.96);
+  --surface-overlay: rgba(10, 7, 3, 0.94);
+
+  --text-primary: #f7ecd2;
+  --text-secondary: #d8c39a;
+  --text-muted: #a8916a;
+
+  --line: rgba(245, 208, 122, 0.22);
+  --line-strong: rgba(245, 208, 122, 0.45);
+
+  --accent-forest: #7fff00;
+  --accent-ocean: #39c0e6;
+  --accent-savannah: #f0a83a;
+  --accent-danger: #ff5a5a;
+  --accent-reward: #ffcf33;
+
+  --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-focus: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 5px rgba(245, 208, 122, 0.6);
+
+  --hud-safe-top: env(safe-area-inset-top, 0px);
+  --hud-safe-right: env(safe-area-inset-right, 0px);
+  --hud-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --hud-safe-left: env(safe-area-inset-left, 0px);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ── Panels ──────────────────────────────────────────────────────────────── */
+.game-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(61, 34, 16, 0.55), rgba(20, 12, 5, 0.75)),
+    radial-gradient(120% 80% at 50% 0%, rgba(245, 208, 122, 0.08), transparent 60%);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.game-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.game-panel__title {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: clamp(12px, 1.1vw, 15px);
+  color: var(--accent-savannah);
+}
+
+.game-panel__sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.game-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.game-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: rgba(61, 34, 16, 0.7);
+  color: var(--text-primary);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
+}
+.game-button:hover { filter: brightness(1.08); }
+.game-button:active { transform: scale(0.97); }
+.game-button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.game-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.game-button--primary {
+  background: linear-gradient(180deg, #3db02a, #1f7c10);
+  border-color: var(--accent-forest);
+  color: #fff;
+  box-shadow: 0 0 22px rgba(127, 255, 0, 0.35);
+}
+.game-button--savannah {
+  background: linear-gradient(180deg, #3aa0d0, #1f6a8c);
+  border-color: #7fe0ff;
+  color: #fff;
+}
+.game-button--gold {
+  background: linear-gradient(180deg, #e8b520, #b88c0a);
+  border-color: #f5d07a;
+  color: #1a0f05;
+}
+.game-button--danger {
+  background: linear-gradient(180deg, #ff6a6a, #c0303a);
+  border-color: #ffb4b4;
+  color: #fff;
+}
+
+/* ── Progress + status ───────────────────────────────────────────────────── */
+.progress {
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-savannah), var(--accent-reward));
+  transition: width 0.3s ease;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+}
+.status-pill--ok { color: var(--accent-forest); border-color: rgba(127, 255, 0, 0.5); }
+.status-pill--bad { color: var(--accent-danger); border-color: rgba(255, 90, 90, 0.5); }
+.status-pill--muted { color: var(--text-muted); }
+
+/* ── Selected highlight helper ───────────────────────────────────────────── */
+.is-selected {
+  border-color: var(--accent-forest) !important;
+  background: rgba(26, 58, 8, 0.7) !important;
+  box-shadow: 0 0 14px rgba(127, 255, 0, 0.35);
+}
+
+/* ── Layout helpers ──────────────────────────────────────────────────────── */
+.scroll-area { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+:focus-visible { outline: none; box-shadow: var(--shadow-focus); border-radius: var(--radius-sm); }
+
+@media (prefers-reduced-motion: reduce) {
+  .game-button,
+  .status-pill,
+  .progress__fill { transition: none; }
+}

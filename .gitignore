@@ -6,3 +6,9 @@ worker/.wrangler/
 .env.local
 .DS_Store
 .vscode/
+
+# Playwright / e2e artifacts
+test-results/
+playwright-report/
+pw-results*.txt
+blob-report/

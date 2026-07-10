@@ -165,7 +165,7 @@ export default function PortraitLobby({
           return (
             <button
               key={t}
-              onPointerDown={(e) => {
+              onClick={(e) => {
                 e.preventDefault();
                 setTab(t);
               }}
@@ -232,7 +232,7 @@ export default function PortraitLobby({
                   return (
                     <button
                       key={p.seconds}
-                      onPointerDown={(e) => {
+                      onClick={(e) => {
                         e.preventDefault();
                         if (!inGame) onSetDuration(p.seconds);
                       }}
@@ -331,7 +331,7 @@ export default function PortraitLobby({
               {[2, 3, 4, 5, 6].map((n) => (
                 <button
                   key={n}
-                  onPointerDown={(e) => { e.preventDefault(); setBotCount(n); }}
+                  onClick={(e) => { e.preventDefault(); setBotCount(n); }}
                   className="flex-1 py-1 rounded-lg text-xs font-bold border select-none"
                   style={{
                     borderColor: n === botCount ? "#7fff00" : "#5a3a1a",
@@ -346,7 +346,7 @@ export default function PortraitLobby({
               {(["hunter", "random", "animal"] as const).map((r) => (
                 <button
                   key={r}
-                  onPointerDown={(e) => { e.preventDefault(); setSoloRole(r); }}
+                  onClick={(e) => { e.preventDefault(); setSoloRole(r); }}
                   className="flex-1 py-1 rounded-lg text-xs font-bold border select-none"
                   style={{
                     borderColor: r === soloRole ? "#7fff00" : "#5a3a1a",
@@ -358,7 +358,7 @@ export default function PortraitLobby({
               ))}
             </div>
 <button
-               onPointerDown={(e) => {
+               onClick={(e) => {
                  e.preventDefault();
                  if (onSoloWithBots) onSoloWithBots(soloRole, botCount);
                  else if (onStartSolo) onStartSolo();
@@ -381,7 +381,7 @@ export default function PortraitLobby({
 
         {/* Multiplayer Ready button */}
         <button
-          onPointerDown={(e) => {
+          onClick={(e) => {
             e.preventDefault();
             if (canReady) onReady();
           }}
