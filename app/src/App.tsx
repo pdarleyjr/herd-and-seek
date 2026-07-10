@@ -1,16 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { loadAssets, type AssetMap } from "./AssetLoader";
+import { loadAssetsForLevel, preloadAssetsForLevel, type AssetMap } from "./AssetLoader";
 import GameCanvas from "./GameCanvas";
 import LobbyScene from "./components/lobby/LobbyScene";
 import HomeScreen from "./components/home/HomeScreen";
+import ProfileBar from "./components/economy/ProfileBar";
+import ShopModal from "./components/economy/ShopModal";
+import AdminPanel from "./components/admin/AdminPanel";
 import { useGameSocket } from "./useGameSocket";
 import { useViewportInfo } from "./hooks/useViewportInfo";
+import { useProfile } from "./hooks/useProfile";
 import {
   type SerializedState,
   type AnimalType,
   type PerkType,
   type LevelId,
   type ServerMessage,
+  type AdminAuditEntry,
+  type AdminCommand,
   isAnimalAllowed,
   defaultAnimalForLevel,
 } from "./types";
@@ -41,14 +47,41 @@ export default function App() {
   const [gameState, setGameState] = useState<SerializedState | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
   const [selectedAnimal, setSelectedAnimal] = useState<AnimalType>("elephant");
+  const [selectedLevel, setSelectedLevel] = useState<LevelId>("forest");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
   const [endCountdown, setEndCountdown] = useState<number | null>(null);
   const viewport = useViewportInfo();
   const localPosRef = useRef({ x: 100, y: 100 });
 
+  // Economy / persistence.
+  const { profile, setProfile, refresh: refreshProfile } = useProfile(userId, username);
+  const [showShop, setShowShop] = useState(false);
+
+  // Admin control plane.
+  const [adminAuthed, setAdminAuthed] = useState(false);
+  const [adminDenied, setAdminDenied] = useState(false);
+  const [adminAuditLog, setAdminAuditLog] = useState<AdminAuditEntry[]>([]);
+
   useEffect(() => {
-    loadAssets().then(setAssets).catch(console.error);
+    let cancelled = false;
+    loadAssetsForLevel("forest")
+      .then((next) => {
+        if (!cancelled) setAssets(next);
+      })
+      .catch(console.error);
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Background-load the selected level's biome assets ahead of match start so
+  // switching maps never stalls on art (procedural biomes are no-ops).
+  useEffect(() => {
+    if (selectedLevel === "forest" || selectedLevel === "deepDark" || selectedLevel === "savannah") {
+      preloadAssetsForLevel(selectedLevel);
+    }
+  }, [selectedLevel]);
 
   const handleAuth = useCallback(() => {
     soundManager.unlock();
@@ -73,6 +106,7 @@ export default function App() {
         case "MATCH_START": {
           const state = data.payload;
           setGameState(state);
+          setSelectedLevel(state.levelId ?? "forest");
 
           // Reconcile local morph selection with the authoritative server state.
           // Server corrects invalid morphs on SELECT_LEVEL, so trust it here.
@@ -122,18 +156,53 @@ export default function App() {
         case "GAME_OVER": {
           const { reason, state } = data.payload;
           setGameState(state);
+          setSelectedLevel(state.levelId ?? "forest");
           soundManager.gameEnd();
           onEvent(`Game Over: ${reason}`);
           setScreen("GAME");
           setEndCountdown(5);
+          // Match rewards were just persisted server-side — pull the fresh wallet.
+          void refreshProfile();
+          break;
+        }
+        case "ADMIN_OK": {
+          setAdminAuthed(true);
+          setAdminDenied(false);
+          setAdminAuditLog(data.payload.auditLog ?? []);
+          break;
+        }
+        case "ADMIN_DENIED": {
+          setAdminAuthed(false);
+          setAdminDenied(true);
+          break;
+        }
+        case "ADMIN_LOG": {
+          setAdminAuditLog(data.payload.auditLog ?? []);
           break;
         }
       }
     },
-    [userId, onEvent, screen]
+    [userId, onEvent, screen, refreshProfile]
   );
 
   const { send, connected } = useGameSocket(userId, username, handleSocketMessage);
+
+  const handleAdminAuth = useCallback(
+    (key: string) => {
+      send({ type: "ADMIN_AUTH", payload: { adminKey: key } });
+    },
+    [send]
+  );
+
+  const handleAdminCommand = useCallback(
+    (
+      command: AdminCommand,
+      extra?: { levelId?: LevelId; duration?: number; targetId?: string }
+    ) => {
+      send({ type: "ADMIN_CMD", payload: { command, ...extra } });
+    },
+    [send]
+  );
 
   const returnToLobby = useCallback(() => {
     send({ type: "RESTART" });
@@ -171,14 +240,6 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [endCountdown, gameState?.phase, returnToLobby, screen]);
 
-  if (!assets) {
-    return (
-      <div className="flex items-center justify-center h-dvh bg-gray-900 text-white text-xl sm:text-2xl">
-        Loading assets...
-      </div>
-    );
-  }
-
   if (screen === "AUTH") {
     return (
       <HomeScreen
@@ -190,57 +251,86 @@ export default function App() {
   }
 
   if (screen === "LOBBY" && (!gameState || gameState.phase === "LOBBY")) {
-    const selectedLevel: LevelId = gameState?.levelId ?? "forest";
     return (
-      <LobbyScene
-        username={username}
-        userId={userId}
-        gameState={gameState}
-        connected={connected}
-        selectedAnimal={selectedAnimal}
-        selectedPerk={selectedPerk}
-        selectedLevel={selectedLevel}
-        onSelectAnimal={(a) => {
-          setSelectedAnimal(a);
-          send({ type: "SELECT_ANIMAL", payload: { animalType: a } });
-        }}
-        onSelectPerk={(p) => {
-          setSelectedPerk(p);
-          send({ type: "SELECT_PERK", payload: { perk: p } });
-        }}
-        onSelectLevel={(lvl) => {
-          // Optimistically fix our morph so the panel updates instantly; the
-          // server also enforces this and re-syncs authoritative state.
-          setSelectedAnimal((prev) => (isAnimalAllowed(prev, lvl) ? prev : defaultAnimalForLevel(lvl)));
-          send({ type: "SELECT_LEVEL", payload: { levelId: lvl } });
-        }}
-        onSetDuration={(seconds) => {
-          send({ type: "SET_DURATION", payload: { duration: seconds } });
-        }}
-        onReady={() => {
-           send({ type: "READY" });
-         }}
-        onStartSolo={() => {
-           // No role specified — server randomly assigns hunter or animal
-           send({ type: "START_SOLO", payload: {} });
-         }}
-        onSoloWithBots={(role, botCount) => {
-           send({ type: "START_SOLO", payload: { role, botCount } });
-         }}
-      />
+      <>
+        <LobbyScene
+          username={username}
+          userId={userId}
+          gameState={gameState}
+          connected={connected}
+          selectedAnimal={selectedAnimal}
+          selectedPerk={selectedPerk}
+          selectedLevel={selectedLevel}
+          onSelectAnimal={(a) => {
+            setSelectedAnimal(a);
+            send({ type: "SELECT_ANIMAL", payload: { animalType: a } });
+          }}
+          onSelectPerk={(p) => {
+            setSelectedPerk(p);
+            send({ type: "SELECT_PERK", payload: { perk: p } });
+          }}
+          onSelectLevel={(lvl) => {
+            setSelectedLevel(lvl);
+            // Optimistically fix our morph so the panel updates instantly; the
+            // server also enforces this and re-syncs authoritative state.
+            setSelectedAnimal((prev) => (isAnimalAllowed(prev, lvl) ? prev : defaultAnimalForLevel(lvl)));
+            send({ type: "SELECT_LEVEL", payload: { levelId: lvl } });
+          }}
+          onSetDuration={(seconds) => {
+            send({ type: "SET_DURATION", payload: { duration: seconds } });
+          }}
+          onReady={() => {
+            send({ type: "READY" });
+          }}
+          onStartSolo={() => {
+            // No role specified — server randomly assigns hunter or animal
+            send({ type: "START_SOLO", payload: {} });
+          }}
+          onSoloWithBots={(role, botCount) => {
+            send({ type: "START_SOLO", payload: { role, botCount } });
+          }}
+        />
+
+        {/* Wallet pill (top-center overlay) */}
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-30">
+          <ProfileBar profile={profile} onOpenShop={() => setShowShop(true)} />
+        </div>
+
+        {showShop && (
+          <ShopModal
+            userId={userId}
+            username={username}
+            profile={profile}
+            onProfileChange={setProfile}
+            onClose={() => setShowShop(false)}
+          />
+        )}
+
+        <AdminPanel
+          authed={adminAuthed}
+          denied={adminDenied}
+          auditLog={adminAuditLog}
+          gameState={gameState}
+          onAuth={handleAdminAuth}
+          onCommand={handleAdminCommand}
+          onClearDenied={() => setAdminDenied(false)}
+        />
+      </>
     );
   }
 
   const me = gameState?.players.find((p) => p.id === userId);
   const isHunter = me?.isHunter ?? false;
+  const isPhoneLayout = viewport.layoutMode.startsWith("phone");
+  const gameplayAssets = assets ?? ({} as AssetMap);
 
   return (
     <div
       className="relative w-dvw h-dvh overflow-hidden bg-green-900"
-      style={{ touchAction: "none" }}
+      style={{ touchAction: "manipulation" }}
     >
-<GameCanvas
-         assets={assets}
+      <GameCanvas
+         assets={gameplayAssets}
          userId={userId}
          username={username}
          gameState={gameState}
@@ -255,69 +345,116 @@ export default function App() {
             ⏱ {formatTime(gameState.timeRemaining)}
           </div>
 
-          {/* Event Log - lifted above controls on touch devices */}
-          <div
-            className="absolute left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1"
-            style={{
-              bottom: viewport.isCompact
-                ? "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))"
-                : "1rem",
-            }}
-          >
-             <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
-             {eventLog.length === 0 && (
-               <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
-             )}
-             {eventLog.slice(0, 3).map((e, i) => (
-               <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
-             ))}
-           </div>
-
-           {/* Hunter Ammo - bottom right, responsive, positioned above fire button */}
-           {isHunter && (
-             <div
-               className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg"
-               style={{
-                 bottom: viewport.isCompact
-                   ? "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))"
-                   : "1rem",
-               }}
-             >
-               <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
-               <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
-                 {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
-                   <span
-                     key={i}
-                     className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
-                   >
-                     🔫
-                   </span>
-                 ))}
-               </div>
-               <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
-                 {gameState.ammo}/{gameState.maxAmmo}
-               </p>
-             </div>
-           )}
-
-{/* Animal role indicator - bottom right, positioned below perk button on mobile */}
-            {!isHunter && me?.isAlive && (
+          {isPhoneLayout ? (
+            <>
               <div
-                className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm"
+                className="absolute left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1"
                 style={{
-                  bottom: viewport.isCompact
-                    ? "max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 12px))"
-                    : "1rem",
+                  bottom: "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))",
                 }}
               >
-                <p>
-                  Role: <span className="text-green-400">Animal</span>
-                </p>
-                <p className="text-[10px] sm:text-xs text-gray-300">
-                  Survive! Move to blend in.
-                </p>
+                <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
+                {eventLog.length === 0 && (
+                  <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
+                )}
+                {eventLog.slice(0, 3).map((e, i) => (
+                  <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
+                ))}
               </div>
-            )}
+
+              {isHunter ? (
+                <div
+                  className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg"
+                  style={{
+                    bottom: "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))",
+                  }}
+                >
+                  <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
+                  <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
+                    {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
+                      <span
+                        key={i}
+                        className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
+                      >
+                        🔫
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
+                    {gameState.ammo}/{gameState.maxAmmo}
+                  </p>
+                </div>
+              ) : (
+                <div
+                  className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm"
+                  style={{
+                    bottom: "max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 12px))",
+                  }}
+                >
+                  <p>
+                    Role: <span className="text-green-400">Animal</span>
+                  </p>
+                  <p className="text-[10px] sm:text-xs text-gray-300">
+                    Survive! Move to blend in.
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <details
+                className="absolute left-4 z-10 bg-black/70 text-white rounded-lg max-w-[280px] w-[clamp(220px,22vw,320px)]"
+                style={{ top: "4.25rem" }}
+                open
+              >
+                <summary className="cursor-pointer list-none px-4 py-2 text-xs sm:text-sm font-bold text-green-300 select-none">
+                  Events
+                </summary>
+                <div className="px-4 pb-3 space-y-1 max-h-40 overflow-hidden">
+                  {eventLog.length === 0 && (
+                    <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>
+                  )}
+                  {eventLog.slice(0, 4).map((e, i) => (
+                    <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>
+                  ))}
+                </div>
+              </details>
+
+              <div
+                className="absolute right-4 z-10 bg-black/70 text-white px-4 py-3 rounded-lg"
+                style={{ top: "4.25rem" }}
+              >
+                {isHunter ? (
+                  <>
+                    <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
+                    <div className="flex gap-1 flex-wrap max-w-[120px]">
+                      {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
+                        <span
+                          key={i}
+                          className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}
+                        >
+                          🔫
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] sm:text-xs text-gray-300 mt-1">
+                      {gameState.ammo}/{gameState.maxAmmo}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-xs sm:text-sm font-bold text-green-300 mb-1">Role</h3>
+                    <p>
+                      <span className="text-green-400 font-bold">Animal</span>
+                    </p>
+                    <p className="text-[10px] sm:text-xs text-gray-300">
+                      Survive! Move to blend in.
+                    </p>
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
           {/* Neutralized overlay */}
           {!me?.isAlive && !isHunter && (
@@ -355,6 +492,16 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <AdminPanel
+        authed={adminAuthed}
+        denied={adminDenied}
+        auditLog={adminAuditLog}
+        gameState={gameState}
+        onAuth={handleAdminAuth}
+        onCommand={handleAdminCommand}
+        onClearDenied={() => setAdminDenied(false)}
+      />
     </div>
   );
 }

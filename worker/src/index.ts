@@ -5,12 +5,15 @@ export type AnimalType =
   | "panda" | "parrot" | "owl" | "snake"
   // Ocean roster (The Deep Dark)
   | "fish" | "turtle" | "crab" | "octopus"
-  | "jellyfish" | "shark" | "seahorse" | "stingray";
+  | "jellyfish" | "shark" | "seahorse" | "stingray"
+  // Savannah roster (Savannah at Dusk)
+  | "zebra" | "gazelle" | "wildebeest" | "warthog"
+  | "ostrich" | "meerkat" | "hyena" | "secretarybird";
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
 // ── Level system (mirrors app/src/types.ts — keep both in sync) ─────────────
-export type LevelId = "forest" | "deepDark";
+export type LevelId = "forest" | "deepDark" | "savannah";
 
 export const FOREST_ANIMALS: AnimalType[] = [
   "rabbit", "bear", "owl", "snake",
@@ -22,13 +25,19 @@ export const OCEAN_ANIMALS: AnimalType[] = [
   "jellyfish", "shark", "seahorse", "stingray",
 ];
 
+export const SAVANNAH_ANIMALS: AnimalType[] = [
+  "zebra", "gazelle", "wildebeest", "warthog",
+  "ostrich", "meerkat", "hyena", "secretarybird",
+];
+
 export const LEVEL_ANIMALS: Record<LevelId, AnimalType[]> = {
   forest: FOREST_ANIMALS,
   deepDark: OCEAN_ANIMALS,
+  savannah: SAVANNAH_ANIMALS,
 };
 
 export function isValidLevelId(id: unknown): id is LevelId {
-  return id === "forest" || id === "deepDark";
+  return id === "forest" || id === "deepDark" || id === "savannah";
 }
 
 export function animalsForLevel(levelId: LevelId): AnimalType[] {
@@ -92,7 +101,7 @@ interface RoomState {
 }
 
 interface ClientMessage {
-   type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL";
+   type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD";
    payload?: {
      role?: "hunter" | "animal" | "random";
      botCount?: number;
@@ -105,12 +114,215 @@ interface ClientMessage {
      targetX?: number;
      targetY?: number;
      duration?: number;
+     adminKey?: string;
+     command?: string;
+     targetId?: string;
    };
  }
 
 interface ServerMessage {
-  type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER" | "DECOY_SPAWN";
+  type: "SYNC_STATE" | "MATCH_START" | "HIT" | "GAME_OVER" | "DECOY_SPAWN" | "ADMIN_OK" | "ADMIN_DENIED" | "ADMIN_LOG";
   payload: any;
+}
+
+// ── Economy / persistence ───────────────────────────────────────────────────
+interface Env {
+  GAME_ROOM: DurableObjectNamespace;
+  PLAYER_PROFILE: DurableObjectNamespace;
+  ADMIN_KEY?: string;
+}
+
+interface AdminAuditEntry {
+  ts: number;
+  adminId: string;
+  action: string;
+  detail: string;
+}
+
+interface MatchStats {
+  matches: number;
+  wins: number;
+  losses: number;
+  tags: number;       // animals neutralized as hunter
+  survivals: number;  // matches survived as animal
+}
+
+interface PlayerProfile {
+  userId: string;
+  username: string;
+  xp: number;
+  level: number;
+  coins: number;      // soft currency
+  badges: number;     // prestige currency
+  ownedCosmetics: string[];
+  selectedCosmetic: string | null;
+  stats: MatchStats;
+  settings: Record<string, unknown>;
+  isAdmin: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Shop catalog — server-authoritative pricing (mirrored in app/src/economy.ts).
+interface CosmeticDef {
+  id: string;
+  price: number;       // in coins
+  currency: "coins" | "badges";
+}
+const SHOP_CATALOG: Record<string, CosmeticDef> = {
+  trail_leaf: { id: "trail_leaf", price: 120, currency: "coins" },
+  trail_bubbles: { id: "trail_bubbles", price: 120, currency: "coins" },
+  trail_dust: { id: "trail_dust", price: 120, currency: "coins" },
+  nameplate_bronze: { id: "nameplate_bronze", price: 200, currency: "coins" },
+  nameplate_gold: { id: "nameplate_gold", price: 600, currency: "coins" },
+  hat_safari: { id: "hat_safari", price: 350, currency: "coins" },
+  crown_prestige: { id: "crown_prestige", price: 3, currency: "badges" },
+};
+
+function xpForLevel(level: number): number {
+  // Rising curve: level N needs 100 * N^1.5 total-ish; simple incremental here.
+  return Math.floor(100 * Math.pow(level, 1.4));
+}
+
+function recomputeLevel(profile: PlayerProfile): void {
+  let level = 1;
+  while (profile.xp >= xpForLevel(level + 1)) level++;
+  profile.level = level;
+}
+
+function newProfile(userId: string, username: string): PlayerProfile {
+  const now = Date.now();
+  return {
+    userId,
+    username: username || "Anonymous",
+    xp: 0,
+    level: 1,
+    coins: 50, // small welcome grant
+    badges: 0,
+    ownedCosmetics: [],
+    selectedCosmetic: null,
+    stats: { matches: 0, wins: 0, losses: 0, tags: 0, survivals: 0 },
+    settings: {},
+    isAdmin: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+const JSON_HEADERS = {
+  "content-type": "application/json",
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
+
+// Persistent per-user profile. Authoritative source of truth for balances,
+// inventory, XP, and stats (Durable Object storage — strongly consistent).
+export class PlayerProfileDurableObject implements DurableObject {
+  constructor(public ctx: DurableObjectState, public env: Env) {}
+
+  private async load(userId: string, username?: string): Promise<PlayerProfile> {
+    let profile = (await this.ctx.storage.get<PlayerProfile>("profile")) ?? null;
+    if (!profile) {
+      profile = newProfile(userId, username ?? "Anonymous");
+      await this.ctx.storage.put("profile", profile);
+    } else if (username && username !== profile.username) {
+      profile.username = username;
+    }
+    return profile;
+  }
+
+  private async save(profile: PlayerProfile): Promise<void> {
+    profile.updatedAt = Date.now();
+    recomputeLevel(profile);
+    await this.ctx.storage.put("profile", profile);
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const action = url.searchParams.get("action") ?? "get";
+    const userId = url.searchParams.get("userId") ?? "unknown";
+    const username = url.searchParams.get("username") ?? undefined;
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: JSON_HEADERS });
+    }
+
+    const profile = await this.load(userId, username);
+
+    if (action === "get") {
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    if (action === "reward" && request.method === "POST") {
+      // Trusted server-to-server reward from a match room.
+      const body = (await request.json().catch(() => ({}))) as {
+        coins?: number; badges?: number; xp?: number;
+        stat?: Partial<MatchStats>;
+      };
+      profile.coins += Math.max(0, Math.floor(body.coins ?? 0));
+      profile.badges += Math.max(0, Math.floor(body.badges ?? 0));
+      profile.xp += Math.max(0, Math.floor(body.xp ?? 0));
+      if (body.stat) {
+        profile.stats.matches += body.stat.matches ?? 0;
+        profile.stats.wins += body.stat.wins ?? 0;
+        profile.stats.losses += body.stat.losses ?? 0;
+        profile.stats.tags += body.stat.tags ?? 0;
+        profile.stats.survivals += body.stat.survivals ?? 0;
+      }
+      await this.save(profile);
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    if (action === "purchase" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { cosmeticId?: string };
+      const item = body.cosmeticId ? SHOP_CATALOG[body.cosmeticId] : undefined;
+      if (!item) {
+        return new Response(JSON.stringify({ error: "unknown_item", profile }), { status: 400, headers: JSON_HEADERS });
+      }
+      if (profile.ownedCosmetics.includes(item.id)) {
+        return new Response(JSON.stringify({ error: "already_owned", profile }), { status: 400, headers: JSON_HEADERS });
+      }
+      const balance = item.currency === "coins" ? profile.coins : profile.badges;
+      if (balance < item.price) {
+        return new Response(JSON.stringify({ error: "insufficient_funds", profile }), { status: 400, headers: JSON_HEADERS });
+      }
+      if (item.currency === "coins") profile.coins -= item.price;
+      else profile.badges -= item.price;
+      profile.ownedCosmetics.push(item.id);
+      if (!profile.selectedCosmetic) profile.selectedCosmetic = item.id;
+      await this.save(profile);
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    if (action === "select" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { cosmeticId?: string | null };
+      const id = body.cosmeticId ?? null;
+      if (id === null || profile.ownedCosmetics.includes(id)) {
+        profile.selectedCosmetic = id;
+        await this.save(profile);
+      }
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    if (action === "admin-grant" && request.method === "POST") {
+      // Admin-authenticated economy adjustment (verified by caller via ADMIN_KEY).
+      const body = (await request.json().catch(() => ({}))) as {
+        key?: string; coins?: number; badges?: number; xp?: number; makeAdmin?: boolean;
+      };
+      if (!this.env.ADMIN_KEY || body.key !== this.env.ADMIN_KEY) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), { status: 403, headers: JSON_HEADERS });
+      }
+      profile.coins = Math.max(0, profile.coins + Math.floor(body.coins ?? 0));
+      profile.badges = Math.max(0, profile.badges + Math.floor(body.badges ?? 0));
+      profile.xp = Math.max(0, profile.xp + Math.floor(body.xp ?? 0));
+      if (typeof body.makeAdmin === "boolean") profile.isAdmin = body.makeAdmin;
+      await this.save(profile);
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    return new Response(JSON.stringify({ error: "unknown_action" }), { status: 400, headers: JSON_HEADERS });
+  }
 }
 
 const WORLD_SIZE = 2000;
@@ -126,6 +338,8 @@ const ALL_ANIMALS: AnimalType[] = [
   "panda", "parrot", "owl", "snake",
   "fish", "turtle", "crab", "octopus",
   "jellyfish", "shark", "seahorse", "stingray",
+  "zebra", "gazelle", "wildebeest", "warthog",
+  "ostrich", "meerkat", "hyena", "secretarybird",
 ];
 
 function randomAnimal(roster?: AnimalType[]): AnimalType {
@@ -162,8 +376,15 @@ export class GameRoomDurableObject implements DurableObject {
   state: RoomState;
   syncInterval: ReturnType<typeof setInterval> | null = null;
   countdownInterval: ReturnType<typeof setInterval> | null = null;
+  // Per-match reward bookkeeping.
+  rewardsGranted = false;
+  hunterTagCount = 0;
+  // Connection ids that have authenticated as admin this session.
+  adminConns = new Set<string>();
+  // Rolling audit log (also persisted to storage for replay/dispute review).
+  auditLog: AdminAuditEntry[] = [];
 
-  constructor(public ctx: DurableObjectState) {
+  constructor(public ctx: DurableObjectState, public env: Env) {
     this.state = {
       phase: "LOBBY",
       players: [],
@@ -214,11 +435,23 @@ export class GameRoomDurableObject implements DurableObject {
     const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
     if (!attachment) return;
     const userId = attachment.userId;
+    const connectionId = attachment.connectionId;
 
     let parsed: ClientMessage;
     try {
       parsed = JSON.parse(message as string);
     } catch {
+      return;
+    }
+
+    // Admin authentication is handled before the player-existence guard so a
+    // reconnecting admin can always re-authenticate on their live socket.
+    if (parsed.type === "ADMIN_AUTH") {
+      this.handleAdminAuth(ws, connectionId, userId, attachment.username, parsed.payload?.adminKey);
+      return;
+    }
+    if (parsed.type === "ADMIN_CMD") {
+      this.handleAdminCommand(ws, connectionId, userId, parsed.payload ?? {});
       return;
     }
 
@@ -334,6 +567,7 @@ export class GameRoomDurableObject implements DurableObject {
   webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): void {
     const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
     if (!attachment) return;
+    this.adminConns.delete(attachment.connectionId);
     // Only remove the player if THIS connection still owns it. A newer
     // reconnect (same userId) takes over ownership, so a delayed close of the
     // old socket must not strip the player out from under the live socket.
@@ -454,6 +688,8 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.timeRemaining = this.state.matchDuration;
     this.state.matchStartTime = Date.now();
     this.state.winner = null;
+    this.rewardsGranted = false;
+    this.hunterTagCount = 0;
     this.state.eventLog = [`Match started! ${animalCount} animal(s) hiding.`];
 
     this.startSyncLoop();
@@ -499,6 +735,7 @@ this.broadcast({
       hitPlayer.isAlive = false;
       this.state.eventLog.unshift(`${hitPlayer.username} was neutralized!`);
       this.state.eventLog = this.state.eventLog.slice(0, 8);
+      this.hunterTagCount += 1;
       this.broadcast({
         type: "HIT",
         payload: { targetId: hitPlayer.id, targetX, targetY, hit: true },
@@ -535,6 +772,8 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.state.eventLog.unshift(`Game Over: ${reason}`);
     this.state.eventLog = this.state.eventLog.slice(0, 10);
     this.stopLoops();
+    // Persist match rewards to player profiles (server-authoritative economy).
+    this.grantMatchRewards(winner);
     this.broadcast({
       type: "GAME_OVER",
       payload: { winner, reason, state: this.serializeState() },
@@ -543,6 +782,192 @@ endGame(winner: "hunter" | "animals", reason: string) {
       this.resetRoom();
       this.broadcastState();
     }, 5000);
+  }
+
+  // Award coins/badges/XP to each human player based on their match outcome.
+  // Coins come from participation, survival, accurate hunter play, and wins —
+  // not kills alone — so the economy is not a pure PvP grind.
+  grantMatchRewards(winner: "hunter" | "animals") {
+    if (this.rewardsGranted) return;
+    this.rewardsGranted = true;
+    const humans = this.state.players.filter((p) => !p.isBot);
+    for (const p of humans) {
+      const isWinner =
+        (winner === "hunter" && p.isHunter) || (winner === "animals" && !p.isHunter);
+      let coins = 10; // participation
+      let xp = 15;
+      let badges = 0;
+      const stat: Partial<MatchStats> = { matches: 1 };
+      if (p.isHunter) {
+        coins += this.hunterTagCount * 8; // accurate hunter play
+        xp += this.hunterTagCount * 10;
+        stat.tags = this.hunterTagCount;
+      } else if (p.isAlive) {
+        coins += 15; // survived
+        xp += 20;
+        stat.survivals = 1;
+      }
+      if (isWinner) {
+        coins += 25;
+        xp += 30;
+        badges += 1; // prestige currency for a win
+        stat.wins = 1;
+      } else {
+        stat.losses = 1;
+      }
+      // Solo/practice matches earn a reduced payout.
+      if (this.state.isSoloMode) {
+        coins = Math.floor(coins * 0.5);
+        xp = Math.floor(xp * 0.5);
+        badges = 0;
+      }
+      this.rewardProfile(p.id, p.username, { coins, xp, badges, stat });
+    }
+  }
+
+  async rewardProfile(
+    userId: string,
+    username: string,
+    body: { coins: number; xp: number; badges: number; stat: Partial<MatchStats> },
+  ) {
+    try {
+      const id = this.env.PLAYER_PROFILE.idFromName(userId);
+      const stub = this.env.PLAYER_PROFILE.get(id);
+      const url = `https://profile/?action=reward&userId=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`;
+      await stub.fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // Reward persistence is best-effort; never block match flow.
+    }
+  }
+
+  // ── Admin control plane (server-authoritative) ─────────────────────────────
+  private async loadAudit(): Promise<void> {
+    if (this.auditLog.length) return;
+    const stored = await this.ctx.storage.get<AdminAuditEntry[]>("auditLog");
+    if (stored) this.auditLog = stored;
+  }
+
+  private async pushAudit(adminId: string, action: string, detail: string) {
+    await this.loadAudit();
+    this.auditLog.unshift({ ts: Date.now(), adminId, action, detail });
+    this.auditLog = this.auditLog.slice(0, 100);
+    await this.ctx.storage.put("auditLog", this.auditLog);
+  }
+
+  private sendTo(ws: WebSocket, msg: ServerMessage) {
+    try { ws.send(JSON.stringify(msg)); } catch { /* closed */ }
+  }
+
+  async handleAdminAuth(ws: WebSocket, connectionId: string, userId: string, username: string, key?: string) {
+    if (!this.env.ADMIN_KEY || key !== this.env.ADMIN_KEY) {
+      this.sendTo(ws, { type: "ADMIN_DENIED", payload: {} });
+      return;
+    }
+    this.adminConns.add(connectionId);
+    await this.loadAudit();
+    await this.pushAudit(userId, "ADMIN_LOGIN", `${username} authenticated`);
+    // Also flag the persistent profile as admin (best-effort).
+    try {
+      const id = this.env.PLAYER_PROFILE.idFromName(userId);
+      const stub = this.env.PLAYER_PROFILE.get(id);
+      await stub.fetch(
+        `https://profile/?action=admin-grant&userId=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, makeAdmin: true }) },
+      );
+    } catch { /* best-effort */ }
+    this.sendTo(ws, {
+      type: "ADMIN_OK",
+      payload: { auditLog: this.auditLog, state: this.serializeState() },
+    });
+  }
+
+  async handleAdminCommand(
+    ws: WebSocket,
+    connectionId: string,
+    userId: string,
+    payload: { command?: string; levelId?: LevelId; duration?: number; targetId?: string; botCount?: number },
+  ) {
+    if (!this.adminConns.has(connectionId)) {
+      this.sendTo(ws, { type: "ADMIN_DENIED", payload: {} });
+      return;
+    }
+    const cmd = payload.command;
+    switch (cmd) {
+      case "reset_room": {
+        this.resetRoom();
+        await this.pushAudit(userId, "RESET_ROOM", "Room reset to lobby");
+        this.broadcastState();
+        break;
+      }
+      case "end_match": {
+        if (this.state.phase === "PLAYING") {
+          this.endGame("animals", "Match ended by admin");
+          await this.pushAudit(userId, "END_MATCH", "Force-ended match");
+        }
+        break;
+      }
+      case "force_start": {
+        if (this.state.phase === "LOBBY") {
+          for (const p of this.state.players) if (!p.isBot) p.isReady = true;
+          this.broadcastState();
+          this.tryStartMatch();
+          await this.pushAudit(userId, "FORCE_START", "Forced match start");
+        }
+        break;
+      }
+      case "set_level": {
+        if (this.state.phase === "LOBBY" && isValidLevelId(payload.levelId)) {
+          this.state.levelId = payload.levelId;
+          for (const p of this.state.players) {
+            if (!p.isBot && !isAnimalAllowed(p.animalType, this.state.levelId)) {
+              p.animalType = defaultAnimalForLevel(this.state.levelId);
+            }
+          }
+          this.state.players = this.state.players.filter((p) => !p.isBot);
+          await this.pushAudit(userId, "SET_LEVEL", `Level -> ${payload.levelId}`);
+          this.broadcastState();
+        }
+        break;
+      }
+      case "set_duration": {
+        if (this.state.phase === "LOBBY" && typeof payload.duration === "number") {
+          const clamped = Math.max(MATCH_DURATION_MIN, Math.min(MATCH_DURATION_MAX, Math.round(payload.duration)));
+          this.state.matchDuration = clamped;
+          this.state.timeRemaining = clamped;
+          await this.pushAudit(userId, "SET_DURATION", `Duration -> ${clamped}s`);
+          this.broadcastState();
+        }
+        break;
+      }
+      case "kick": {
+        const targetId = payload.targetId;
+        if (targetId) {
+          for (const sock of this.ctx.getWebSockets()) {
+            const att = sock.deserializeAttachment() as { userId: string } | null;
+            if (att?.userId === targetId) {
+              try { sock.close(1000, "Removed by admin"); } catch { /* ignore */ }
+            }
+          }
+          this.state.players = this.state.players.filter((p) => p.id !== targetId);
+          await this.pushAudit(userId, "KICK", `Removed player ${targetId}`);
+          this.broadcastState();
+        }
+        break;
+      }
+      case "clear_bots": {
+        this.state.players = this.state.players.filter((p) => !p.isBot);
+        await this.pushAudit(userId, "CLEAR_BOTS", "Removed all bots");
+        this.broadcastState();
+        break;
+      }
+      default:
+        break;
+    }
+    this.sendTo(ws, { type: "ADMIN_LOG", payload: { auditLog: this.auditLog } });
   }
 
   startSyncLoop() {
@@ -756,6 +1181,8 @@ endGame(winner: "hunter" | "animals", reason: string) {
     this.state.matchStartTime = Date.now();
     this.state.winner = null;
     this.state.isSoloMode = true;
+    this.rewardsGranted = false;
+    this.hunterTagCount = 0;
     this.state.eventLog = [
       finalRole === "hunter"
         ? `Solo practice: You are the Hunter. Find the ${animalCount} AI animals!`
@@ -897,13 +1324,27 @@ endGame(winner: "hunter" | "animals", reason: string) {
 }
 
 export default {
-  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const roomId = url.searchParams.get("room") || "lobby";
 
+    // ── Player profile / economy HTTP API ────────────────────────────────────
+    if (url.pathname.startsWith("/api/profile")) {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { headers: JSON_HEADERS });
+      }
+      const userId = url.searchParams.get("userId");
+      if (!userId) {
+        return new Response(JSON.stringify({ error: "missing_userId" }), { status: 400, headers: JSON_HEADERS });
+      }
+      const id = env.PLAYER_PROFILE.idFromName(userId);
+      const stub = env.PLAYER_PROFILE.get(id);
+      return stub.fetch(request);
+    }
+
+    // ── Realtime game room (WebSocket) ───────────────────────────────────────
+    const roomId = url.searchParams.get("room") || "lobby";
     const id = env.GAME_ROOM.idFromName(roomId);
     const stub = env.GAME_ROOM.get(id);
-
     return stub.fetch(request);
   },
 };

@@ -55,7 +55,7 @@ export default function LobbyScene({
   onStartSolo,
   onSoloWithBots,
 }: LobbySceneProps) {
-  const { isPortrait, isCompact } = useViewportInfo();
+  const { layoutMode, isPhone } = useViewportInfo();
 
   const me = gameState?.players.find((p) => p.id === userId);
   const isReady = me?.isReady ?? false;
@@ -65,9 +65,10 @@ export default function LobbyScene({
 
   const inGame = gameState?.phase === "PLAYING";
   const allowedAnimals = animalsForLevel(selectedLevel);
+  const isLandscapeTablet = layoutMode === "tablet-landscape";
 
-  // Portrait mobile: use vertical tab layout instead of 3-column grid
-  if (isPortrait || isCompact) {
+  // Phones and tablet portrait: use vertical tab layout instead of the full grid.
+  if (isPhone || layoutMode === "tablet-portrait") {
     return (
       <PortraitLobby
         username={username}
@@ -84,7 +85,7 @@ export default function LobbyScene({
         onReady={onReady}
         onStartSolo={onStartSolo}
         onSoloWithBots={onSoloWithBots}
-        compact={isCompact}
+        compact={isPhone || layoutMode === "tablet-portrait"}
       />
     );
   }
@@ -100,8 +101,8 @@ export default function LobbyScene({
         style={{
           gridTemplateColumns: "minmax(0,2fr) minmax(0,3fr) minmax(0,2fr)",
           gridTemplateRows: "auto 1fr auto auto",
-          gap: "12px",
-          padding: "14px",
+          gap: isLandscapeTablet ? "10px" : "12px",
+          padding: isLandscapeTablet ? "12px" : "14px",
           zIndex: 1,
         }}
       >
@@ -191,9 +192,9 @@ export default function LobbyScene({
         className="absolute pointer-events-none"
         style={{
           left: "50%",
-          bottom: "38%",
+          bottom: isLandscapeTablet ? "36%" : "38%",
           transform: "translateX(-50%)",
-          width: "clamp(160px, 26vw, 340px)",
+          width: isLandscapeTablet ? "clamp(150px, 24vw, 320px)" : "clamp(160px, 26vw, 340px)",
           zIndex: 0,
           filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.4))",
         }}

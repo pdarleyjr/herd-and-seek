@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { type AssetMap } from "./AssetLoader";
+import { type AssetMap, type AssetKey, getAsset } from "./AssetLoader";
 import { useViewportInfo } from "./hooks/useViewportInfo";
 import {
   type SerializedState,
@@ -11,16 +11,26 @@ import {
   ANIMAL_SPEED,
   HUNTER_SPEED,
   PLAYER_RENDER_RADIUS,
+  ANIMAL_DEFS,
 } from "./types";
 import { soundManager } from "./SoundManager";
+import { resolveShotTarget } from "./gameplay/shotTarget";
 import {
   drawOceanAnimal,
   drawScubaHunter,
   drawOceanBackground,
   drawOceanObject,
   generateOceanEnvironment,
+  isOceanAnimal,
   isPointInCover,
+  drawSavannaAnimal,
+  drawRangerHunter,
+  drawSavannaBackground,
+  drawSavannaObject,
+  generateSavannaEnvironment,
+  isSavannaAnimal,
   type OceanEnvironment,
+  type SavannaEnvironment,
   type ForestEntityRefs,
 } from "./game/levelRenderer";
 
@@ -114,14 +124,43 @@ function getAnimalImage(
   assets: AssetMap,
   type: AnimalType
 ): HTMLImageElement | null {
-  // Only forest animals have PNG sprites. Ocean animals are drawn procedurally.
-  const img = (assets as unknown as Record<string, HTMLImageElement | undefined>)[type];
-  return img ?? null;
+  // Only forest animals have PNG sprites. Ocean/savannah animals are procedural.
+  if (isOceanAnimal(type) || isSavannaAnimal(type)) return null;
+  return getAsset(assets, type as Extract<AssetKey, AnimalType>);
 }
 
-function generateTrees(): TreeEntity[] {
+function drawFallbackForestAnimal(
+  ctx: CanvasRenderingContext2D,
+  type: AnimalType,
+  sx: number,
+  sy: number,
+  size: number,
+  vx: number = 0,
+) {
+  const color = ANIMAL_DEFS[type]?.color ?? "#8a8a8a";
+  const facingLeft = vx < -0.1;
+  ctx.save();
+  ctx.translate(sx, sy);
+  if (facingLeft) ctx.scale(-1, 1);
+  const r = size / 2;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(-r * 0.72, -r * 0.46, r * 1.45, r * 0.92, r * 0.32);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.beginPath();
+  ctx.ellipse(r * 0.12, -r * 0.06, r * 0.28, r * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(r * 0.42, -r * 0.06, r * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function generateTrees(density = 1): TreeEntity[] {
   const trees: TreeEntity[] = [];
-  const count = 85; // denser forest
+  const count = Math.max(28, Math.round(85 * density)); // denser forest
   for (let i = 0; i < count; i++) {
     const r = Math.random();
     // More bushes in forest (30%), balanced green/brown trees
@@ -136,9 +175,9 @@ function generateTrees(): TreeEntity[] {
   return trees;
 }
 
-function generateRocks(): RockEntity[] {
+function generateRocks(density = 1): RockEntity[] {
   const rocks: RockEntity[] = [];
-  const count = 45; // more rock clusters for cover
+  const count = Math.max(18, Math.round(45 * density)); // more rock clusters for cover
   for (let i = 0; i < count; i++) {
     const large = i < 12;
     rocks.push({
@@ -153,29 +192,23 @@ function generateRocks(): RockEntity[] {
   return rocks;
 }
 
-function generateGrassPatches(): GrassPatch[] {
+function generateGrassPatches(density = 1): GrassPatch[] {
   const patches: GrassPatch[] = [];
-  for (let i = 0; i < 70; i++) { // denser undergrowth for hiding
-    const tall = i < 30; // first 30 are definitely tall (hiding spots)
+  const count = Math.max(24, Math.round(70 * density));
+  const tallCount = Math.max(12, Math.round(30 * density));
+  for (let i = 0; i < count; i++) { // denser undergrowth for hiding
+    const tall = i < tallCount; // first patches are definitely tall (hiding spots)
     patches.push({
       x: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
       y: Math.floor(Math.random() * (WORLD_SIZE - 200)) + 100,
-      count: tall ? 7 + Math.floor(Math.random() * 5) : 4 + Math.floor(Math.random() * 4),
-      spread: tall ? 22 + Math.floor(Math.random() * 22) : 14 + Math.floor(Math.random() * 16),
+      count: tall ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 4),
+      spread: tall ? 20 + Math.floor(Math.random() * 18) : 12 + Math.floor(Math.random() * 14),
       tall,
       seed: Math.floor(Math.random() * 9999) + 1,
       withFlower: !tall && Math.random() < 0.35,
     });
   }
   return patches;
-}
-
-function isTouchDevice(): boolean {
-  return (
-    "ontouchstart" in window ||
-    navigator.maxTouchPoints > 0 ||
-    window.matchMedia("(pointer: coarse)").matches
-  );
 }
 
 const PERK_ICONS: Record<PerkType, string> = {
@@ -204,6 +237,7 @@ export default function GameCanvas({
   const rocksRef = useRef<RockEntity[]>([]);
   const grassPatchesRef = useRef<GrassPatch[]>([]);
   const oceanRef = useRef<OceanEnvironment | null>(null);
+  const savannaRef = useRef<SavannaEnvironment | null>(null);
   const levelRef = useRef<LevelId>("forest");
   const decoysRef = useRef<DecoyEntity[]>([]);
   const serverStateRef = useRef<SerializedState | null>(null);
@@ -245,11 +279,20 @@ export default function GameCanvas({
   // Ref to the FIRE button so the canvas click handler can avoid firing when
   // the click actually landed on the button (avoids phantom desktop shots).
   const fireButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  const [isMobile] = useState(() => isTouchDevice());
   const viewport = useViewportInfo();
+  const isPhoneControls = viewport.isPhone;
+  const showTouchControls = viewport.isTouch;
   const lastTimeRef = useRef(0);
   const lastFireStampRef = useRef(0);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const staticLayerRef = useRef<HTMLCanvasElement | null>(null);
+  const staticLayerSignatureRef = useRef("");
+  const perkHudStateRef = useRef<{
+    active: boolean;
+    cooldown: boolean;
+    remaining: number;
+  }>({ active: false, cooldown: false, remaining: 0 });
+  const aimTargetClearTimerRef = useRef<number | null>(null);
 
   const aimRef = useRef<{
     active: boolean;
@@ -289,6 +332,171 @@ export default function GameCanvas({
     remaining: number;
   }>({ active: false, cooldown: false, remaining: 0 });
 
+  const rebuildStaticLayer = useCallback(() => {
+    if (typeof document === "undefined") return;
+
+    const lvl = levelRef.current;
+    const forestSignature = [
+      lvl,
+      treesRef.current.length,
+      rocksRef.current.length,
+      grassPatchesRef.current.length,
+      Boolean(getAsset(assets, "tree")),
+      Boolean(getAsset(assets, "treeBrown")),
+      Boolean(getAsset(assets, "bush")),
+      Boolean(getAsset(assets, "hunter")),
+    ].join(":");
+    const oceanSignature = [
+      lvl,
+      oceanRef.current?.objects.length ?? 0,
+    ].join(":");
+    const savannaSignature = [
+      lvl,
+      savannaRef.current?.objects.length ?? 0,
+    ].join(":");
+    const nextSignature =
+      lvl === "forest"
+        ? `forest:${forestSignature}`
+        : lvl === "savannah"
+          ? `savannah:${savannaSignature}`
+          : `deepDark:${oceanSignature}`;
+    if (staticLayerRef.current && staticLayerSignatureRef.current === nextSignature) {
+      return;
+    }
+
+    const layer = document.createElement("canvas");
+    layer.width = WORLD_SIZE;
+    layer.height = WORLD_SIZE;
+    const lctx = layer.getContext("2d");
+    if (!lctx) return;
+
+    if (lvl === "forest") {
+      lctx.fillStyle = "#3d7a25";
+      lctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+      lctx.strokeStyle = "#1a3c0a";
+      lctx.lineWidth = 12;
+      lctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+      const gridSize = 120;
+      lctx.strokeStyle = "rgba(0,0,0,0.055)";
+      lctx.lineWidth = 1;
+      for (let x = 0; x < WORLD_SIZE; x += gridSize) {
+        lctx.beginPath();
+        lctx.moveTo(x, 0);
+        lctx.lineTo(x, WORLD_SIZE);
+        lctx.stroke();
+      }
+      for (let y = 0; y < WORLD_SIZE; y += gridSize) {
+        lctx.beginPath();
+        lctx.moveTo(0, y);
+        lctx.lineTo(WORLD_SIZE, y);
+        lctx.stroke();
+      }
+
+      const drawTree = (sx: number, sy: number, type: TreeEntity["type"]) => {
+        const tree = type === "bush" ? getAsset(assets, "bush") : type === "brown" ? getAsset(assets, "treeBrown") : getAsset(assets, "tree");
+        if (tree) {
+          const size = type === "bush" ? 52 : 88;
+          lctx.drawImage(tree, sx - size / 2, sy - size / 2, size, size);
+          return;
+        }
+
+        lctx.save();
+        lctx.translate(sx, sy);
+        if (type === "bush") {
+          lctx.fillStyle = "#2f6f1f";
+          lctx.beginPath();
+          lctx.ellipse(0, 0, 22, 16, 0, 0, Math.PI * 2);
+          lctx.fill();
+        } else {
+          lctx.fillStyle = type === "brown" ? "#6c4a26" : "#2e7a1f";
+          lctx.fillRect(-8, 8, 16, 36);
+          lctx.fillStyle = type === "brown" ? "#7b5a36" : "#2f8b24";
+          lctx.beginPath();
+          lctx.arc(0, -12, type === "brown" ? 26 : 30, 0, Math.PI * 2);
+          lctx.fill();
+        }
+        lctx.restore();
+      };
+
+      for (const patch of grassPatchesRef.current) {
+        const rng = prng(patch.seed);
+        const bx = patch.x;
+        const by = patch.y;
+        const bladeH = patch.tall ? 20 : 12;
+        for (let i = 0; i < patch.count; i++) {
+          const ox = (rng() - 0.5) * patch.spread * 2;
+          const oy = (rng() - 0.5) * patch.spread * 0.55;
+          const bh = bladeH + rng() * 8;
+          const sw = (rng() - 0.5) * 7;
+          lctx.strokeStyle = i % 2 === 0 ? "#287810" : "#3a9818";
+          lctx.lineWidth = 2;
+          lctx.beginPath();
+          lctx.moveTo(bx + ox, by + oy);
+          lctx.quadraticCurveTo(bx + ox + sw, by + oy - bh * 0.55, bx + ox + sw * 1.4, by + oy - bh);
+          lctx.stroke();
+        }
+        if (patch.withFlower) {
+          const fx = bx;
+          const fy = by - bladeH - 3;
+          lctx.fillStyle = "#fffde0";
+          lctx.beginPath();
+          lctx.arc(fx, fy, 3.5, 0, Math.PI * 2);
+          lctx.fill();
+          lctx.fillStyle = "#f5c030";
+          lctx.beginPath();
+          lctx.arc(fx, fy, 2, 0, Math.PI * 2);
+          lctx.fill();
+        }
+      }
+
+      for (const t of treesRef.current) {
+        drawTree(t.x, t.y, t.type);
+      }
+
+      for (const r of rocksRef.current) {
+        lctx.save();
+        lctx.translate(r.x, r.y);
+        lctx.rotate(r.rotation);
+        lctx.fillStyle = r.colorIdx === 0 ? "#8b8175" : r.colorIdx === 1 ? "#65605a" : "#a09184";
+        lctx.beginPath();
+        lctx.ellipse(0, 0, r.rx, r.ry, 0, 0, Math.PI * 2);
+        lctx.fill();
+        lctx.restore();
+      }
+    } else if (oceanRef.current) {
+      for (const obj of oceanRef.current.objects) {
+        drawOceanObject(lctx, obj, obj.x, obj.y, 0);
+      }
+    }
+
+    if (lvl === "savannah" && savannaRef.current) {
+      // Bake the savannah ground + all cover objects into the static layer.
+      const g = lctx.createLinearGradient(0, 0, 0, WORLD_SIZE);
+      g.addColorStop(0, "#c9903f");
+      g.addColorStop(0.5, "#b87f34");
+      g.addColorStop(1, "#8f5f26");
+      lctx.fillStyle = g;
+      lctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+      lctx.strokeStyle = "#6a4420";
+      lctx.lineWidth = 12;
+      lctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+      // Draw larger cover first (waterholes/acacia/mounds), grass last on top.
+      const order: SavannaEnvironment["objects"][number]["kind"][] = [
+        "waterhole", "rock", "mound", "acacia", "grass",
+      ];
+      for (const kind of order) {
+        for (const obj of savannaRef.current.objects) {
+          if (obj.kind === kind) drawSavannaObject(lctx, obj, obj.x, obj.y, 0);
+        }
+      }
+    }
+
+    staticLayerRef.current = layer;
+    staticLayerSignatureRef.current = nextSignature;
+  }, [assets]);
+
   useEffect(() => {
     if (!gameState) return;
     serverStateRef.current = gameState;
@@ -323,6 +531,7 @@ export default function GameCanvas({
         treesRef.current = [];
         rocksRef.current = [];
         grassPatchesRef.current = [];
+        savannaRef.current = null;
         const rnd = (() => {
           let a = (seed | 0) >>> 0;
           return () => {
@@ -333,15 +542,36 @@ export default function GameCanvas({
           };
         })();
         oceanRef.current = generateOceanEnvironment(rnd);
+      } else if (lvl === "savannah") {
+        // Clear other biomes.
+        treesRef.current = [];
+        rocksRef.current = [];
+        grassPatchesRef.current = [];
+        oceanRef.current = null;
+        const rnd = (() => {
+          let a = (seed | 0) >>> 0;
+          return () => {
+            a = (a + 0x9e3779b9) | 0;
+            let t = Math.imul(a ^ (a >>> 16), 2246822507);
+            t = Math.imul(t ^ (t >>> 13), 3266489917);
+            return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
+          };
+        })();
+        savannaRef.current = generateSavannaEnvironment(rnd);
       } else {
         levelRef.current = "forest";
-        treesRef.current = generateTrees();
-        rocksRef.current = generateRocks();
-        grassPatchesRef.current = generateGrassPatches();
+        const density = viewport.isPhone ? 0.72 : viewport.isTablet ? 0.86 : 1;
+        treesRef.current = generateTrees(density);
+        rocksRef.current = generateRocks(density);
+        grassPatchesRef.current = generateGrassPatches(density);
         oceanRef.current = null;
+        savannaRef.current = null;
       }
+      rebuildStaticLayer();
       soundManager.gameStart();
     }
+
+    rebuildStaticLayer();
 
     // Update remote player render targets for interpolation
     for (const p of gameState.players) {
@@ -370,10 +600,11 @@ export default function GameCanvas({
         }
       }
     }
-  }, [gameState, localPosRef, userId]);
+  }, [gameState, localPosRef, rebuildStaticLayer, userId, viewport.isPhone, viewport.isTablet]);
 
   const spawnAmbientParticle = useCallback(() => {
-    if (ambientParticlesRef.current.length > 18) return;
+    const maxAmbientParticles = viewport.isPhone ? 10 : viewport.isTablet ? 14 : 18;
+    if (ambientParticlesRef.current.length > maxAmbientParticles) return;
     const cam = cameraRef.current;
     const w = canvasSizeRef.current.w;
     const h = canvasSizeRef.current.h;
@@ -390,7 +621,7 @@ export default function GameCanvas({
         ? (Math.random() < 0.5 ? "rgba(220,245,255,0.4)" : "rgba(120,220,230,0.35)")
         : (Math.random() < 0.5 ? "rgba(255,255,200,0.3)" : "rgba(150,255,150,0.3)"),
     });
-  }, []);
+  }, [viewport.isPhone, viewport.isTablet]);
 
   const updateNpcs = useCallback(() => {
     npcsRef.current = npcsRef.current.map((npc) => {
@@ -446,7 +677,7 @@ export default function GameCanvas({
     }
   }, [spawnAmbientParticle]);
 
-const updateLocalPlayer = useCallback(() => {
+  const updateLocalPlayer = useCallback(() => {
     const state = serverStateRef.current;
     if (!state || state.phase !== "PLAYING") return;
 
@@ -461,7 +692,7 @@ const updateLocalPlayer = useCallback(() => {
     if (keys["a"] || keys["arrowleft"]) dx -= 1;
     if (keys["d"] || keys["arrowright"]) dx += 1;
 
-    if (isMobile && joystickRef.current.active) {
+    if (showTouchControls && joystickRef.current.active) {
       dx = joystickRef.current.dx;
       dy = joystickRef.current.dy;
     }
@@ -541,28 +772,38 @@ const updateLocalPlayer = useCallback(() => {
     const nowMs = Date.now();
     const isActive = nowMs < perkStateRef.current.activeUntil;
     const isCooldown = nowMs < perkStateRef.current.cooldownUntil;
-    setPerkActiveState({
+    const nextPerkState = {
       active: isActive,
       cooldown: isCooldown,
       remaining: isCooldown
         ? Math.ceil((perkStateRef.current.cooldownUntil - nowMs) / 1000)
         : 0,
-    });
+    };
+    const prevPerkState = perkHudStateRef.current;
+    if (
+      prevPerkState.active !== nextPerkState.active ||
+      prevPerkState.cooldown !== nextPerkState.cooldown ||
+      prevPerkState.remaining !== nextPerkState.remaining
+    ) {
+      perkHudStateRef.current = nextPerkState;
+      setPerkActiveState(nextPerkState);
+    }
 
-    if (nowMs - lastSyncRef.current > 1000 / 30) {
+    if (nowMs - lastSyncRef.current > viewport.syncIntervalMs) {
       lastSyncRef.current = nowMs;
       send({
         type: "SYNC",
         payload: { x: localPosRef.current.x, y: localPosRef.current.y },
       });
     }
-  }, [userId, send, localPosRef, isMobile]);
+  }, [userId, send, localPosRef, showTouchControls, viewport.syncIntervalMs]);
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current ?? canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
+    ctxRef.current = ctx;
 
     const { w, h } = canvasSizeRef.current;
     ctx.clearRect(0, 0, w, h);
@@ -572,7 +813,12 @@ const updateLocalPlayer = useCallback(() => {
 
     const lvl: LevelId = levelRef.current;
     const isOcean = lvl === "deepDark";
+    const isSavanna = lvl === "savannah";
     const time = performance.now();
+    const staticLayer = staticLayerRef.current;
+    const hasForestStaticLayer = Boolean(staticLayer && lvl === "forest");
+    const hasOceanStaticLayer = Boolean(staticLayer && isOcean);
+    const hasSavannaStaticLayer = Boolean(staticLayer && isSavanna);
 
     const me = state.players.find((p) => p.id === userId);
     const isHunter = me?.isHunter ?? false;
@@ -604,88 +850,109 @@ const updateLocalPlayer = useCallback(() => {
       ctx.strokeStyle = "rgba(120,200,255,0.25)";
       ctx.lineWidth = 12;
       ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+      if (hasOceanStaticLayer && staticLayer) {
+        ctx.drawImage(staticLayer, camX, camY, w, h, 0, 0, w, h);
+      }
+    } else if (isSavanna) {
+      // Savannah: warm dusk ground base then baked cover layer.
+      if (hasSavannaStaticLayer && staticLayer) {
+        ctx.drawImage(staticLayer, camX, camY, w, h, 0, 0, w, h);
+      } else {
+        drawSavannaBackground(ctx, camX, camY, w, h, time);
+        ctx.strokeStyle = "#6a4420";
+        ctx.lineWidth = 12;
+        ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+        if (savannaRef.current) {
+          for (const o of savannaRef.current.objects) {
+            drawSavannaObject(ctx, o, o.x - camX, o.y - camY, time);
+          }
+        }
+      }
     } else {
-      // ── Rich forest terrain base ────────────────────────────────────────────
-      ctx.fillStyle = "#3d7a25";
-      ctx.fillRect(0, 0, w, h);
+      if (hasForestStaticLayer && staticLayer) {
+        ctx.drawImage(staticLayer, camX, camY, w, h, 0, 0, w, h);
+      } else {
+        // ── Rich forest terrain base ────────────────────────────────────────────
+        ctx.fillStyle = "#3d7a25";
+        ctx.fillRect(0, 0, w, h);
 
-      ctx.strokeStyle = "#1a3c0a";
-      ctx.lineWidth = 12;
-      ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
-    }
+        ctx.strokeStyle = "#1a3c0a";
+        ctx.lineWidth = 12;
+        ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
 
-    if (!isOcean) {
-    const PATCH_GRID = 160;
-    const patchStartX = Math.floor(camX / PATCH_GRID) * PATCH_GRID;
-    const patchStartY = Math.floor(camY / PATCH_GRID) * PATCH_GRID;
-    for (let px = patchStartX - PATCH_GRID; px < camX + w + PATCH_GRID; px += PATCH_GRID) {
-      for (let py = patchStartY - PATCH_GRID; py < camY + h + PATCH_GRID; py += PATCH_GRID) {
-        const s = Math.abs((px * 7919 + py * 6271) & 0x7fffffff);
-        if (s % 10 < 4) {
-          const sx = px - camX + (s % PATCH_GRID) * 0.22;
-          const sy = py - camY + ((s >> 8) % PATCH_GRID) * 0.22;
-          const prx = 50 + (s & 55);
-          const pry = 32 + ((s >> 4) & 40);
-          ctx.fillStyle = s % 3 === 0 ? "rgba(22,80,8,0.11)" : "rgba(62,120,18,0.09)";
+        const PATCH_GRID = 160;
+        const patchStartX = Math.floor(camX / PATCH_GRID) * PATCH_GRID;
+        const patchStartY = Math.floor(camY / PATCH_GRID) * PATCH_GRID;
+        for (let px = patchStartX - PATCH_GRID; px < camX + w + PATCH_GRID; px += PATCH_GRID) {
+          for (let py = patchStartY - PATCH_GRID; py < camY + h + PATCH_GRID; py += PATCH_GRID) {
+            const s = Math.abs((px * 7919 + py * 6271) & 0x7fffffff);
+            if (s % 10 < 4) {
+              const sx = px - camX + (s % PATCH_GRID) * 0.22;
+              const sy = py - camY + ((s >> 8) % PATCH_GRID) * 0.22;
+              const prx = 50 + (s & 55);
+              const pry = 32 + ((s >> 4) & 40);
+              ctx.fillStyle = s % 3 === 0 ? "rgba(22,80,8,0.11)" : "rgba(62,120,18,0.09)";
+              ctx.beginPath();
+              ctx.ellipse(sx, sy, prx, pry, (s & 3) * 0.55, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // ── Grid ───────────────────────────────────────────────────────────────
+        const gridSize = 120;
+        ctx.strokeStyle = "rgba(0,0,0,0.055)";
+        ctx.lineWidth = 1;
+        const startX = Math.floor(camX / gridSize) * gridSize;
+        const startY = Math.floor(camY / gridSize) * gridSize;
+        for (let x = startX; x < camX + w + gridSize; x += gridSize) {
           ctx.beginPath();
-          ctx.ellipse(sx, sy, prx, pry, (s & 3) * 0.55, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.moveTo(x - camX, 0);
+          ctx.lineTo(x - camX, h);
+          ctx.stroke();
+        }
+        for (let y = startY; y < camY + h + gridSize; y += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y - camY);
+          ctx.lineTo(w, y - camY);
+          ctx.stroke();
+        }
+
+        // ── Grass patches (drawn before sprites — always behind entities) ───────
+        for (const patch of grassPatchesRef.current) {
+          const bx = patch.x - camX;
+          const by = patch.y - camY;
+          if (bx < -60 || bx > w + 60 || by < -60 || by > h + 60) continue;
+          const rng = prng(patch.seed);
+          const bladeH = patch.tall ? 20 : 12;
+          for (let i = 0; i < patch.count; i++) {
+            const ox = (rng() - 0.5) * patch.spread * 2;
+            const oy = (rng() - 0.5) * patch.spread * 0.55;
+            const bh = bladeH + rng() * 8;
+            const sw = (rng() - 0.5) * 7;
+            ctx.strokeStyle = i % 2 === 0 ? "#287810" : "#3a9818";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(bx + ox, by + oy);
+            ctx.quadraticCurveTo(bx + ox + sw, by + oy - bh * 0.55, bx + ox + sw * 1.4, by + oy - bh);
+            ctx.stroke();
+          }
+          if (patch.withFlower) {
+            const fx = bx;
+            const fy = by - bladeH - 3;
+            ctx.fillStyle = "#fffde0";
+            ctx.beginPath();
+            ctx.arc(fx, fy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#f5c030";
+            ctx.beginPath();
+            ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
     }
 
-    // ── Grid ───────────────────────────────────────────────────────────────
-    const gridSize = 120;
-    ctx.strokeStyle = "rgba(0,0,0,0.055)";
-    ctx.lineWidth = 1;
-    const startX = Math.floor(camX / gridSize) * gridSize;
-    const startY = Math.floor(camY / gridSize) * gridSize;
-    for (let x = startX; x < camX + w + gridSize; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x - camX, 0);
-      ctx.lineTo(x - camX, h);
-      ctx.stroke();
-    }
-    for (let y = startY; y < camY + h + gridSize; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y - camY);
-      ctx.lineTo(w, y - camY);
-      ctx.stroke();
-    }
-
-    // ── Grass patches (drawn before sprites — always behind entities) ───────
-    for (const patch of grassPatchesRef.current) {
-      const bx = patch.x - camX;
-      const by = patch.y - camY;
-      if (bx < -60 || bx > w + 60 || by < -60 || by > h + 60) continue;
-      const rng = prng(patch.seed);
-      const bladeH = patch.tall ? 20 : 12;
-      for (let i = 0; i < patch.count; i++) {
-        const ox = (rng() - 0.5) * patch.spread * 2;
-        const oy = (rng() - 0.5) * patch.spread * 0.55;
-        const bh = bladeH + rng() * 8;
-        const sw = (rng() - 0.5) * 7;
-        ctx.strokeStyle = i % 2 === 0 ? "#287810" : "#3a9818";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(bx + ox, by + oy);
-        ctx.quadraticCurveTo(bx + ox + sw, by + oy - bh * 0.55, bx + ox + sw * 1.4, by + oy - bh);
-        ctx.stroke();
-      }
-      if (patch.withFlower) {
-        const fx = bx;
-        const fy = by - bladeH - 3;
-        ctx.fillStyle = "#fffde0";
-        ctx.beginPath();
-        ctx.arc(fx, fy, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#f5c030";
-        ctx.beginPath();
-        ctx.arc(fx, fy, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    } // end forest terrain/grid/grass
 
     for (const p of ambientParticlesRef.current) {
       const alpha = (p.life / p.maxLife) * 0.4;
@@ -724,8 +991,18 @@ const updateLocalPlayer = useCallback(() => {
     } => {
       const img = getAnimalImage(assets, type);
       if (img) return { img, flipX: vx < -0.1 };
+      if (isOceanAnimal(type)) {
+        return {
+          drawFn: (sx, sy) => drawOceanAnimal(ctx, type, sx, sy, 64, vx),
+        };
+      }
+      if (isSavannaAnimal(type)) {
+        return {
+          drawFn: (sx, sy) => drawSavannaAnimal(ctx, type, sx, sy, 64, vx),
+        };
+      }
       return {
-        drawFn: (sx, sy) => drawOceanAnimal(ctx, type, sx, sy, 64, vx),
+        drawFn: (sx, sy) => drawFallbackForestAnimal(ctx, type, sx, sy, 64, vx),
       };
     };
 
@@ -788,8 +1065,16 @@ const updateLocalPlayer = useCallback(() => {
           drawFn = (sx, sy) =>
             drawScubaHunter(ctx, sx, sy, aimAngleRef.current, moving, 64, time);
           shadow = false; // scuba drawFn paints its own shadow
+        } else if (isSavanna) {
+          const moving = isLocal
+            ? joystickRef.current.active ||
+              Object.values(keysRef.current).some(Boolean)
+            : false;
+          drawFn = (sx, sy) =>
+            drawRangerHunter(ctx, sx, sy, aimAngleRef.current, moving, 64);
+          shadow = false; // ranger drawFn paints its own shadow
         } else {
-          img = assets.hunter;
+          img = getAsset(assets, "hunter") ?? undefined;
         }
       } else {
         const sp = animalSprite(p.animalType, 0);
@@ -810,7 +1095,7 @@ const updateLocalPlayer = useCallback(() => {
         glow = "rgba(255, 220, 50, 0.2)";
       }
 
-renderArray.push({
+      renderArray.push({
          x: px,
          y: py,
          img,
@@ -824,57 +1109,62 @@ renderArray.push({
        });
     }
 
-    for (const t of treesRef.current) {
-const img =
-        t.type === "bush" ? assets.bush : t.type === "brown" ? assets.treeBrown : assets.tree;
-      renderArray.push({
-        x: t.x,
-        y: t.y,
-        img,
-        rotation: 0,
-        size: t.type === "bush" ? 52 : 88,
-        isEntity: false,
-        shadow: t.type !== "bush",
-        alpha: 1,
-        glow: null,
-      });
+    if (!hasForestStaticLayer) {
+      for (const t of treesRef.current) {
+        const img = t.type === "bush"
+          ? getAsset(assets, "bush") ?? undefined
+          : t.type === "brown"
+            ? getAsset(assets, "treeBrown") ?? undefined
+            : getAsset(assets, "tree") ?? undefined;
+        renderArray.push({
+          x: t.x,
+          y: t.y,
+          img,
+          rotation: 0,
+          size: t.type === "bush" ? 52 : 88,
+          isEntity: false,
+          shadow: t.type !== "bush",
+          alpha: 1,
+          glow: null,
+        });
+      }
+
+      // Rocks — added as drawFn items so they sort correctly with sprites
+      const rockColors = ["#8a8878", "#787868", "#9a9a88"];
+      for (const rock of rocksRef.current) {
+        const { x, y, rx, ry, rotation, colorIdx } = rock;
+        renderArray.push({
+          x,
+          y,
+          rotation: 0,
+          size: rx,
+          isEntity: false,
+          shadow: false,
+          alpha: 1,
+          glow: null,
+          drawFn: (sx: number, sy: number) => {
+            // Rock shadow
+            ctx.fillStyle = "rgba(0,0,0,0.22)";
+            ctx.beginPath();
+            ctx.ellipse(sx + rx * 0.28, sy + ry * 0.55, rx * 0.82, ry * 0.42, rotation, 0, Math.PI * 2);
+            ctx.fill();
+            // Rock body
+            ctx.fillStyle = rockColors[colorIdx];
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, rx, ry, rotation, 0, Math.PI * 2);
+            ctx.fill();
+            // Highlight
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.beginPath();
+            ctx.ellipse(sx - rx * 0.22, sy - ry * 0.22, rx * 0.38, ry * 0.28, rotation - 0.4, 0, Math.PI * 2);
+            ctx.fill();
+          },
+        });
+      }
     }
 
-    // Rocks — added as drawFn items so they sort correctly with sprites
-    const rockColors = ["#8a8878", "#787868", "#9a9a88"];
-    for (const rock of rocksRef.current) {
-      const { x, y, rx, ry, rotation, colorIdx } = rock;
-      renderArray.push({
-        x,
-        y,
-        rotation: 0,
-        size: rx,
-        isEntity: false,
-        shadow: false,
-        alpha: 1,
-        glow: null,
-        drawFn: (sx: number, sy: number) => {
-          // Rock shadow
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.beginPath();
-          ctx.ellipse(sx + rx * 0.28, sy + ry * 0.55, rx * 0.82, ry * 0.42, rotation, 0, Math.PI * 2);
-          ctx.fill();
-          // Rock body
-          ctx.fillStyle = rockColors[colorIdx];
-          ctx.beginPath();
-          ctx.ellipse(sx, sy, rx, ry, rotation, 0, Math.PI * 2);
-          ctx.fill();
-          // Highlight
-          ctx.fillStyle = "rgba(255,255,255,0.2)";
-          ctx.beginPath();
-          ctx.ellipse(sx - rx * 0.22, sy - ry * 0.22, rx * 0.38, ry * 0.28, rotation - 0.4, 0, Math.PI * 2);
-          ctx.fill();
-        },
-      });
-    }
-
-    // ── Ocean environment objects (boots, barrels, reef, kelp, seaweed) ──
-    if (isOcean && oceanRef.current) {
+    // ── Ocean environment objects (boats, barrels, reef, kelp, seaweed) ──
+    if (isOcean && oceanRef.current && !hasOceanStaticLayer) {
       for (const o of oceanRef.current.objects) {
         renderArray.push({
           x: o.x,
@@ -1259,9 +1549,9 @@ for (const item of renderArray) {
     if (me && me.isHunter && me.isAlive) {
       // Use actual aim target world position (tap position) when available; fall back to angle-based
       const crosshairWorldX = aimTargetRef.current ? aimTargetRef.current.worldX
-        : (isMobile ? localPosRef.current.x + Math.cos(aimAngleRef.current) * 200 : mouseRef.current.worldX);
+      : (showTouchControls ? localPosRef.current.x + Math.cos(aimAngleRef.current) * 200 : mouseRef.current.worldX);
       const crosshairWorldY = aimTargetRef.current ? aimTargetRef.current.worldY
-        : (isMobile ? localPosRef.current.y + Math.sin(aimAngleRef.current) * 200 : mouseRef.current.worldY);
+      : (showTouchControls ? localPosRef.current.y + Math.sin(aimAngleRef.current) * 200 : mouseRef.current.worldY);
       const mx = crosshairWorldX - camX;
       const my = crosshairWorldY - camY;
 
@@ -1300,7 +1590,7 @@ for (const item of renderArray) {
 
       // Aim-assist indicator (mobile/tablet only): soft ring on the target
       // the shot is being nudged toward, plus a faint magnetism line.
-      if (isMobile && assistTargetIdRef.current) {
+      if (showTouchControls && assistTargetIdRef.current) {
         const t = state.players.find(
           (p) => p.id === assistTargetIdRef.current && p.isAlive && !p.isHunter,
         );
@@ -1384,8 +1674,9 @@ for (const item of renderArray) {
       const oceanEnv = isOcean ? oceanRef.current : null;
       const inCover = isPointInCover(
         lvl, px, py,
-        isOcean ? null : ({ grassPatches: grassPatchesRef.current } as ForestEntityRefs),
+        lvl === "forest" ? ({ grassPatches: grassPatchesRef.current } as ForestEntityRefs) : null,
         oceanEnv,
+        isSavanna ? savannaRef.current : null,
       );
 
       if (inCover) {
@@ -1416,7 +1707,7 @@ for (const item of renderArray) {
     }
 
     gameTickRef.current++;
-  }, [assets, userId, localPosRef, username, isMobile]);
+  }, [assets, userId, localPosRef, username, showTouchControls]);
 
   const activatePerk = useCallback(() => {
     const state = serverStateRef.current;
@@ -1471,29 +1762,20 @@ decoysRef.current.push({
     const me = state.players.find((p) => p.id === userId);
     if (!me || !me.isHunter || !me.isAlive) return;
 
-    // Resolve target: aim drag position (mobile) → mouse world pos (desktop) → forward fallback
-    let tX: number;
-    let tY: number;
-
-    if (aimTargetRef.current) {
-      // Mobile drag or previous aim target — this is the crosshair's exact world location
-      tX = aimTargetRef.current.worldX;
-      tY = aimTargetRef.current.worldY;
-    } else if (!isMobile && (mouseRef.current.worldX !== 0 || mouseRef.current.worldY !== 0)) {
-      // Desktop — fire exactly at the mouse cursor world position
-      tX = mouseRef.current.worldX;
-      tY = mouseRef.current.worldY;
-    } else {
-      // Last-resort fallback: fire forward along aim angle (600 units)
-      const a = aimAngleRef.current;
-      tX = localPosRef.current.x + Math.cos(a) * 600;
-      tY = localPosRef.current.y + Math.sin(a) * 600;
-    }
+    const target = resolveShotTarget({
+      showTouchControls,
+      aimTarget: aimTargetRef.current,
+      mouseTarget: mouseRef.current,
+      localPos: localPosRef.current,
+      aimAngle: aimAngleRef.current,
+    });
+    let tX = target.worldX;
+    let tY = target.worldY;
 
     // ── Mobile / tablet aim assist (never active on desktop) ─────────────
     // Softly nudges the shot toward the nearest valid animal inside a narrow
     // cone. It never hard-locks and is weakened when the target is concealed.
-    if (isMobile) {
+    if (showTouchControls) {
       const lvl = levelRef.current;
       const hx = localPosRef.current.x;
       const hy = localPosRef.current.y;
@@ -1522,6 +1804,7 @@ decoysRef.current.push({
             lvl, cand.x, cand.y,
             lvl === "forest" ? ({ grassPatches: grassPatchesRef.current } as ForestEntityRefs) : null,
             lvl === "deepDark" ? oceanRef.current : null,
+            lvl === "savannah" ? savannaRef.current : null,
           );
           const strength = concealed ? 0.12 : 0.35;
           bestDelta = absDelta;
@@ -1555,7 +1838,11 @@ decoysRef.current.push({
 
     send({ type: "SHOOT", payload: { targetX: tX, targetY: tY } });
     soundManager.gunshot();
-  }, [userId, send, localPosRef, isMobile]);
+
+    if (!showTouchControls) {
+      aimTargetRef.current = null;
+    }
+  }, [userId, send, localPosRef, showTouchControls]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1603,13 +1890,14 @@ decoysRef.current.push({
       const vv = window.visualViewport;
       const w = vv ? Math.floor(vv.width) : window.innerWidth;
       const h = vv ? Math.floor(vv.height) : window.innerHeight;
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, viewport.renderDprCap));
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
       canvas.width = Math.max(1, Math.floor(w * dpr));
       canvas.height = Math.max(1, Math.floor(h * dpr));
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { alpha: false });
       if (ctx) {
+        ctxRef.current = ctx;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.imageSmoothingEnabled = false;
       }
@@ -1677,6 +1965,7 @@ decoysRef.current.push({
       if (!state || state.phase !== "PLAYING") return;
       const me = state.players.find((p) => p.id === userId);
       if (!me || !me.isAlive) return;
+      if (e.pointerType === "mouse" && !showTouchControls) return;
 
       const w = window.innerWidth;
       const isMovementZone = !me.isHunter || e.clientX < w * 0.45;
@@ -1769,9 +2058,6 @@ decoysRef.current.push({
         aimRef.current.active = false;
         aimRef.current.touchId = null;
 
-        // Touch/tap aim still works, but a second quick tap in roughly the
-        // same spot is treated as fire so touchscreen users have a natural
-        // two-step "aim, then shoot" gesture. Dragging still only aims.
         const tapDuration = Date.now() - aimTapStartTimeRef.current;
         const tapDistance = Math.hypot(
           e.clientX - aimTapStartXRef.current,
@@ -1779,7 +2065,19 @@ decoysRef.current.push({
         );
         const isTap = tapDuration <= TAP_MAX_DURATION_MS && tapDistance <= TAP_MAX_MOVE_PX;
         if (e.pointerType !== "mouse") {
-          if (isTap) {
+          if (isPhoneControls) {
+            fireShot();
+            if (aimTargetClearTimerRef.current !== null) {
+              window.clearTimeout(aimTargetClearTimerRef.current);
+            }
+            aimTargetClearTimerRef.current = window.setTimeout(() => {
+              if (aimPointerIdRef.current === null) {
+                aimTargetRef.current = null;
+              }
+              aimTargetClearTimerRef.current = null;
+            }, 220);
+            clearTouchTapCandidate();
+          } else if (isTap) {
             registerTouchTap(e.clientX, e.clientY);
           } else {
             clearTouchTapCandidate();
@@ -1812,6 +2110,18 @@ decoysRef.current.push({
       if (aimPointerIdRef.current === e.pointerId) {
         aimPointerIdRef.current = null;
         aimRef.current.active = false;
+        if (isPhoneControls) {
+          fireShot();
+          if (aimTargetClearTimerRef.current !== null) {
+            window.clearTimeout(aimTargetClearTimerRef.current);
+          }
+          aimTargetClearTimerRef.current = window.setTimeout(() => {
+            if (aimPointerIdRef.current === null) {
+              aimTargetRef.current = null;
+            }
+            aimTargetClearTimerRef.current = null;
+          }, 220);
+        }
         setAimVisual({ visible: false, x: 0, y: 0 });
       }
     };
@@ -1842,9 +2152,24 @@ decoysRef.current.push({
       window.removeEventListener("pointerup", onWindowPointerUp);
       window.removeEventListener("pointercancel", onWindowPointerUp);
       clearTouchTapCandidate();
+      if (aimTargetClearTimerRef.current !== null) {
+        window.clearTimeout(aimTargetClearTimerRef.current);
+        aimTargetClearTimerRef.current = null;
+      }
       cancelAnimationFrame(rafRef.current);
     };
-  }, [activatePerk, fireShot, localPosRef, render, updateLocalPlayer, updateNpcs, userId]);
+  }, [
+    activatePerk,
+    fireShot,
+    localPosRef,
+    render,
+    isPhoneControls,
+    showTouchControls,
+    updateLocalPlayer,
+    updateNpcs,
+    userId,
+    viewport.renderDprCap,
+  ]);
 
   const currentPlayer = gameState?.players.find((p) => p.id === userId);
   const hasPerk = currentPlayer && !currentPlayer.isHunter && currentPlayer.isAlive && currentPlayer.perk !== "none";
@@ -1858,7 +2183,7 @@ decoysRef.current.push({
         style={{ touchAction: "none" }}
       />
 
-      {isMobile && joystickVisual.visible && (
+      {showTouchControls && joystickVisual.visible && (
         <div className="absolute z-5 pointer-events-none" style={{ left: 0, top: 0 }}>
           <div
             className="absolute rounded-full border-4 border-white/30 bg-white/10"
@@ -1881,7 +2206,7 @@ decoysRef.current.push({
         </div>
       )}
 
-      {isMobile && aimVisual.visible && (
+      {showTouchControls && aimVisual.visible && (
         <div
           className="absolute z-5 pointer-events-none"
           style={{
@@ -1914,8 +2239,12 @@ decoysRef.current.push({
               <div className="inline-flex flex-col gap-1 bg-black/70 rounded-xl px-4 py-2">
                 <span className="text-white/90 text-sm font-bold">🎮 Hunter Controls</span>
                 <span className="text-white/70 text-xs">Drag right → Aim crosshair</span>
-                <span className="text-white/70 text-xs">Double tap right → FIRE</span>
-                <span className="text-red-300 text-xs font-bold">Big red button → FIRE</span>
+                <span className="text-white/70 text-xs">
+                  {isPhoneControls ? "Release to fire" : "Double tap right → FIRE"}
+                </span>
+                {!isPhoneControls && (
+                  <span className="text-red-300 text-xs font-bold">Big red button → FIRE</span>
+                )}
               </div>
             </div>
           )}
@@ -1924,6 +2253,7 @@ decoysRef.current.push({
            (bigger on tablets) with a larger invisible hit pad so it's easy to
            hit on phones and iPads. Safe-area aware so it never sits under the
            home indicator or notch. */}
+          {!isPhoneControls && (
           <div
             className="absolute z-10"
             style={{
@@ -1961,11 +2291,12 @@ decoysRef.current.push({
               <span style={{ color: "white", fontSize: viewport.isCompact ? "clamp(12px,2.4vw,16px)" : "clamp(10px,1.6vw,13px)", fontWeight: 900, letterSpacing: "0.12em", marginTop: 2 }}>FIRE</span>
             </button>
           </div>
+          )}
         </>
       )}
 
 {/* Perk button - bottom center for animals */}
-       {isMobile && hasPerk && gameState?.phase === "PLAYING" && (
+       {showTouchControls && hasPerk && gameState?.phase === "PLAYING" && (
          <button
            onPointerDown={(e) => {
              e.preventDefault();

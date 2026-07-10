@@ -13,7 +13,9 @@ interface MorphPanelProps {
 
 function levelSubtitle(levelId?: LevelId): string {
   if (!levelId) return "Choose your disguise";
-  return levelId === "deepDark" ? "Choose your ocean disguise" : "Choose your forest disguise";
+  if (levelId === "deepDark") return "Choose your ocean disguise";
+  if (levelId === "savannah") return "Choose your savannah disguise";
+  return "Choose your forest disguise";
 }
 
 export default function MorphPanel({
@@ -55,8 +57,8 @@ export default function MorphPanel({
                   : "border-[#5a3a1a] bg-[#2a1808]/70 hover:border-[#a07030] hover:bg-[#3a2010]/70 active:scale-95",
               ].join(" ")}
             >
-              {def.ocean ? (
-                // No PNG sprite for ocean animals — render a colored disc with emoji.
+              {def.ocean || def.savannah ? (
+                // No PNG sprite for ocean/savannah animals — colored disc + emoji.
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center border border-[#0c2233]"
                   style={{

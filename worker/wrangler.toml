@@ -2,10 +2,23 @@ name = "herd-and-seek-backend"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
+[vars]
+# Default admin passphrase. Override in production with:
+#   npx wrangler secret put ADMIN_KEY
+ADMIN_KEY = "herd-admin"
+
 [[durable_objects.bindings]]
 name = "GAME_ROOM"
 class_name = "GameRoomDurableObject"
 
+[[durable_objects.bindings]]
+name = "PLAYER_PROFILE"
+class_name = "PlayerProfileDurableObject"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["GameRoomDurableObject"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["PlayerProfileDurableObject"]

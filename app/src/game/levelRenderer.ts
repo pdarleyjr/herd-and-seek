@@ -20,8 +20,16 @@ export const OCEAN_ANIMALS_LIST: AnimalType[] = [
   "fish", "turtle", "crab", "octopus", "jellyfish", "shark", "seahorse", "stingray",
 ];
 
+export const SAVANNA_ANIMALS_LIST: AnimalType[] = [
+  "zebra", "gazelle", "wildebeest", "warthog", "ostrich", "meerkat", "hyena", "secretarybird",
+];
+
 export function isOceanAnimal(type: AnimalType): boolean {
   return (ANIMAL_DEFS[type]?.ocean) ?? OCEAN_ANIMALS_LIST.includes(type);
+}
+
+export function isSavannaAnimal(type: AnimalType): boolean {
+  return (ANIMAL_DEFS[type]?.savannah) ?? SAVANNA_ANIMALS_LIST.includes(type);
 }
 
 export function animalColor(type: AnimalType): string {
@@ -794,6 +802,7 @@ export function isPointInCover(
   py: number,
   forest: ForestEntityRefs | null,
   ocean: OceanEnvironment | null,
+  savanna: SavannaEnvironment | null = null,
 ): boolean {
   if (levelId === "forest") {
     if (!forest) return false;
@@ -805,10 +814,573 @@ export function isPointInCover(
     });
   }
   // Ocean: kelp & seaweed conceal; barrels/reef also count as soft cover.
-  if (!ocean) return false;
-  return ocean.objects.some((o) => {
-    if (o.kind !== "kelp" && o.kind !== "seaweed" && o.kind !== "barrel") return false;
-    const d = Math.hypot(px - o.x, py - o.y);
-    return d < o.size + 18;
+  if (levelId === "deepDark") {
+    if (!ocean) return false;
+    return ocean.objects.some((o) => {
+      if (o.kind !== "kelp" && o.kind !== "seaweed" && o.kind !== "barrel") return false;
+      const d = Math.hypot(px - o.x, py - o.y);
+      return d < o.size + 18;
+    });
+  }
+  if (levelId === "savannah") {
+    return isPointInSavannaCover(px, py, savanna);
+  }
+  return false;
+}
+
+// ── Savannah at Dusk ────────────────────────────────────────────────────────
+// Top-down procedural sprites for the savannah roster (no PNG assets). Kept in
+// the same rounded cartoon style as the ocean creatures for visual cohesion.
+export function drawSavannaAnimal(
+  ctx: CanvasRenderingContext2D,
+  type: AnimalType,
+  x: number,
+  y: number,
+  size: number,
+  vx: number = 0,
+): void {
+  const facingLeft = vx < -0.1;
+  ctx.save();
+  ctx.translate(x, y);
+  if (facingLeft) ctx.scale(-1, 1);
+  const r = size / 2;
+  const base = animalColor(type);
+
+  const bodyEllipse = (rx: number, ry: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const eye = (ex: number, ey: number, s = 0.06) => {
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.arc(ex, ey, r * s, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  switch (type) {
+    case "zebra": {
+      bodyEllipse(r * 0.95, r * 0.6, base);
+      // stripes
+      ctx.strokeStyle = "#20242b";
+      ctx.lineWidth = r * 0.13;
+      for (let i = -3; i <= 3; i++) {
+        const sx = i * r * 0.24;
+        ctx.beginPath();
+        ctx.moveTo(sx, -r * 0.55);
+        ctx.lineTo(sx + r * 0.08, r * 0.55);
+        ctx.stroke();
+      }
+      // head + mane
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.9, -r * 0.05, r * 0.32, r * 0.24, 0, 0, Math.PI * 2);
+      ctx.fill();
+      eye(r * 1.0, -r * 0.08);
+      break;
+    }
+    case "gazelle": {
+      bodyEllipse(r * 0.85, r * 0.5, base);
+      // lighter belly
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.beginPath();
+      ctx.ellipse(0, r * 0.22, r * 0.6, r * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // head
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.85, -r * 0.15, r * 0.26, r * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // horns
+      ctx.strokeStyle = "#2a2018";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(r * 0.9, -r * 0.28); ctx.lineTo(r * 1.05, -r * 0.6);
+      ctx.moveTo(r * 0.78, -r * 0.28); ctx.lineTo(r * 0.9, -r * 0.62);
+      ctx.stroke();
+      eye(r * 0.95, -r * 0.16);
+      break;
+    }
+    case "wildebeest": {
+      bodyEllipse(r * 1.0, r * 0.62, base);
+      // shoulder hump
+      ctx.fillStyle = "#4a423a";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.2, -r * 0.35, r * 0.5, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // head
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.95, r * 0.02, r * 0.3, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // curved horns
+      ctx.strokeStyle = "#2a2620";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(r * 0.95, -r * 0.2);
+      ctx.quadraticCurveTo(r * 1.25, -r * 0.35, r * 1.15, -r * 0.05);
+      ctx.stroke();
+      eye(r * 1.05, -r * 0.02);
+      break;
+    }
+    case "warthog": {
+      bodyEllipse(r * 0.9, r * 0.55, base);
+      // mane bristles
+      ctx.strokeStyle = "#4a3520";
+      ctx.lineWidth = 2;
+      for (let i = -2; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * r * 0.22, -r * 0.5);
+        ctx.lineTo(i * r * 0.22, -r * 0.78);
+        ctx.stroke();
+      }
+      // snout
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.9, r * 0.06, r * 0.28, r * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // tusks
+      ctx.strokeStyle = "#f0ead6";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(r * 1.05, r * 0.12); ctx.lineTo(r * 1.2, -r * 0.05);
+      ctx.stroke();
+      eye(r * 0.95, -r * 0.02);
+      break;
+    }
+    case "ostrich": {
+      // round body of feathers
+      bodyEllipse(r * 0.65, r * 0.62, base);
+      // neck + head
+      ctx.strokeStyle = "#c99a6a";
+      ctx.lineWidth = r * 0.14;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(r * 0.4, -r * 0.2);
+      ctx.quadraticCurveTo(r * 0.95, -r * 0.5, r * 0.9, -r * 0.85);
+      ctx.stroke();
+      ctx.fillStyle = "#c99a6a";
+      ctx.beginPath();
+      ctx.arc(r * 0.9, -r * 0.9, r * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+      eye(r * 0.96, -r * 0.94, 0.05);
+      // legs
+      ctx.strokeStyle = "#b0803a";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.1, r * 0.55); ctx.lineTo(-r * 0.1, r * 0.95);
+      ctx.moveTo(r * 0.2, r * 0.55); ctx.lineTo(r * 0.2, r * 0.95);
+      ctx.stroke();
+      break;
+    }
+    case "meerkat": {
+      // small upright body
+      bodyEllipse(r * 0.42, r * 0.6, base);
+      // head
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.arc(0, -r * 0.62, r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // dark eye patches
+      ctx.fillStyle = "#3a2a1a";
+      ctx.beginPath();
+      ctx.arc(-r * 0.12, -r * 0.62, r * 0.09, 0, Math.PI * 2);
+      ctx.arc(r * 0.12, -r * 0.62, r * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      eye(-r * 0.12, -r * 0.62, 0.04);
+      eye(r * 0.12, -r * 0.62, 0.04);
+      break;
+    }
+    case "hyena": {
+      bodyEllipse(r * 0.92, r * 0.55, base);
+      // spots
+      ctx.fillStyle = "rgba(60,45,30,0.6)";
+      for (const [sx, sy] of [[-r*0.3,-r*0.1],[r*0.05,r*0.12],[-r*0.1,-r*0.25],[r*0.25,-r*0.05]]) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 0.09, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // sloped shoulders / head
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.ellipse(r * 0.9, -r * 0.08, r * 0.3, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // ears
+      ctx.beginPath();
+      ctx.moveTo(r * 0.78, -r * 0.28); ctx.lineTo(r * 0.7, -r * 0.5); ctx.lineTo(r * 0.9, -r * 0.34);
+      ctx.fill();
+      eye(r * 1.0, -r * 0.1);
+      break;
+    }
+    case "secretarybird": {
+      // body
+      bodyEllipse(r * 0.55, r * 0.5, base);
+      // wing edge
+      ctx.fillStyle = "#3a3630";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.2, r * 0.05, r * 0.35, r * 0.3, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // neck + head crest
+      ctx.strokeStyle = base;
+      ctx.lineWidth = r * 0.12;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(r * 0.35, -r * 0.15);
+      ctx.quadraticCurveTo(r * 0.8, -r * 0.4, r * 0.8, -r * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = base;
+      ctx.beginPath();
+      ctx.arc(r * 0.8, -r * 0.72, r * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      // crest feathers
+      ctx.strokeStyle = "#2a2620";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(r * 0.8, -r * 0.82); ctx.lineTo(r * 0.95, -r * 1.0);
+      ctx.moveTo(r * 0.78, -r * 0.84); ctx.lineTo(r * 0.72, -r * 1.02);
+      ctx.stroke();
+      // long legs
+      ctx.strokeStyle = "#c8c2b4";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.05, r * 0.45); ctx.lineTo(-r * 0.05, r * 0.95);
+      ctx.moveTo(r * 0.2, r * 0.45); ctx.lineTo(r * 0.2, r * 0.95);
+      ctx.stroke();
+      eye(r * 0.86, -r * 0.74, 0.05);
+      break;
+    }
+    default: {
+      bodyEllipse(r * 0.7, r * 0.5, base);
+      eye(r * 0.4, -r * 0.06);
+    }
+  }
+  ctx.restore();
+}
+
+// Ranger hunter (savannah) — top-down, rotated by facingAngle.
+export function drawRangerHunter(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  facingAngle: number,
+  isMoving: boolean,
+  size: number,
+): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(facingAngle + Math.PI / 2);
+  const r = size / 2;
+
+  // long dusk shadow
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(0, r * 0.15, r * 0.6, r * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // legs (khaki)
+  ctx.fillStyle = "#a98b52";
+  ctx.beginPath();
+  ctx.roundRect(-r * 0.28, r * 0.15, r * 0.22, r * 0.6, 4);
+  ctx.roundRect(r * 0.06, r * 0.15, r * 0.22, r * 0.6, 4);
+  ctx.fill();
+
+  // torso (safari vest)
+  ctx.fillStyle = "#6f7a3a";
+  ctx.beginPath();
+  ctx.ellipse(0, -r * 0.05, r * 0.5, r * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // vest pockets
+  ctx.strokeStyle = "#4c5426";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-r * 0.3, -r * 0.05, r * 0.24, r * 0.28);
+  ctx.strokeRect(r * 0.06, -r * 0.05, r * 0.24, r * 0.28);
+
+  // arms holding a tranq rifle forward
+  ctx.strokeStyle = "#6f7a3a";
+  ctx.lineWidth = r * 0.2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.3, -r * 0.2); ctx.lineTo(0, -r * 0.7);
+  ctx.moveTo(r * 0.3, -r * 0.2); ctx.lineTo(0, -r * 0.7);
+  ctx.stroke();
+  // rifle
+  ctx.strokeStyle = "#2c2420";
+  ctx.lineWidth = r * 0.12;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.4); ctx.lineTo(0, -r * 1.05);
+  ctx.stroke();
+
+  // safari hat (from above: brim + crown)
+  ctx.fillStyle = "#8a6b34";
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.5, r * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#a5854a";
+  ctx.beginPath();
+  ctx.arc(0, -r * 0.5, r * 0.24, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (isMoving) {
+    // faint dust puff behind
+    ctx.fillStyle = "rgba(210,180,120,0.25)";
+    ctx.beginPath();
+    ctx.arc(0, r * 0.75, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+export interface SavannaObj {
+  id: number;
+  kind: "acacia" | "mound" | "waterhole" | "grass" | "rock";
+  x: number;
+  y: number;
+  size: number;
+  rotation: number;
+}
+
+export interface SavannaEnvironment {
+  objects: SavannaObj[];
+}
+
+export function generateSavannaEnvironment(rand: () => number): SavannaEnvironment {
+  const objects: SavannaObj[] = [];
+  let id = 0;
+
+  // Watering holes — big open landmarks (also soft cover at the reedy edge).
+  for (let i = 0; i < 3; i++) {
+    objects.push({
+      id: id++,
+      kind: "waterhole",
+      x: Math.floor(rand() * (WORLD_SIZE - 500)) + 250,
+      y: Math.floor(rand() * (WORLD_SIZE - 500)) + 250,
+      size: 90 + rand() * 60,
+      rotation: 0,
+    });
+  }
+  // Acacia trees — flat-topped silhouettes, hard cover.
+  for (let i = 0; i < 26; i++) {
+    objects.push({
+      id: id++,
+      kind: "acacia",
+      x: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      y: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      size: 44 + rand() * 30,
+      rotation: rand() * Math.PI * 2,
+    });
+  }
+  // Termite mounds — hard cover.
+  for (let i = 0; i < 20; i++) {
+    objects.push({
+      id: id++,
+      kind: "mound",
+      x: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      y: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      size: 22 + rand() * 18,
+      rotation: rand() * Math.PI,
+    });
+  }
+  // Scattered rocks.
+  for (let i = 0; i < 24; i++) {
+    objects.push({
+      id: id++,
+      kind: "rock",
+      x: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      y: Math.floor(rand() * (WORLD_SIZE - 200)) + 100,
+      size: 12 + rand() * 16,
+      rotation: rand() * Math.PI,
+    });
+  }
+  // Tall yellow grass tufts — primary concealment cover.
+  for (let i = 0; i < 90; i++) {
+    objects.push({
+      id: id++,
+      kind: "grass",
+      x: Math.floor(rand() * (WORLD_SIZE - 160)) + 80,
+      y: Math.floor(rand() * (WORLD_SIZE - 160)) + 80,
+      size: 30 + rand() * 26,
+      rotation: Math.floor(rand() * 9999) + 1,
+    });
+  }
+  return { objects };
+}
+
+export function drawSavannaBackground(
+  ctx: CanvasRenderingContext2D,
+  camX: number,
+  camY: number,
+  w: number,
+  h: number,
+  time: number,
+): void {
+  // Warm dusk gradient across the ground plane.
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, "#c9903f");
+  g.addColorStop(0.5, "#b87f34");
+  g.addColorStop(1, "#8f5f26");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+
+  // Faint drifting heat-haze band (very subtle) driven by time.
+  const haze = (Math.sin(time * 0.0003) * 0.5 + 0.5) * 0.05;
+  ctx.fillStyle = `rgba(255,220,150,${haze.toFixed(3)})`;
+  ctx.fillRect(0, h * 0.35, w, h * 0.12);
+
+  // Mottled dry-earth patches (deterministic, world-anchored).
+  const PATCH = 150;
+  const sx = Math.floor(camX / PATCH) * PATCH;
+  const sy = Math.floor(camY / PATCH) * PATCH;
+  for (let px = sx - PATCH; px < camX + w + PATCH; px += PATCH) {
+    for (let py = sy - PATCH; py < camY + h + PATCH; py += PATCH) {
+      const s = Math.abs((px * 7919 + py * 6271) & 0x7fffffff);
+      if (s % 7 < 3) {
+        ctx.fillStyle = s % 2 === 0 ? "rgba(150,100,40,0.16)" : "rgba(90,60,25,0.14)";
+        ctx.beginPath();
+        ctx.ellipse(
+          px - camX + (s & (PATCH - 1)) * 0.35,
+          py - camY + ((s >> 8) & (PATCH - 1)) * 0.35,
+          50 + (s & 40), 30 + ((s >> 4) & 30),
+          (s & 3) * 0.5, 0, Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
+  }
+}
+
+export function drawSavannaObject(
+  ctx: CanvasRenderingContext2D,
+  obj: SavannaObj,
+  sx: number,
+  sy: number,
+  time: number,
+): void {
+  const { kind, size } = obj;
+  switch (kind) {
+    case "waterhole": {
+      ctx.save();
+      ctx.translate(sx, sy);
+      // muddy rim
+      ctx.fillStyle = "#7a5426";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size * 1.12, size * 0.82, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // water
+      const wg = ctx.createRadialGradient(0, 0, size * 0.2, 0, 0, size);
+      wg.addColorStop(0, "#4a86a0");
+      wg.addColorStop(1, "#2f5f78");
+      ctx.fillStyle = wg;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size, size * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // dusk sky reflection
+      ctx.fillStyle = "rgba(255,200,120,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.2, -size * 0.15, size * 0.5, size * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case "acacia": {
+      ctx.save();
+      ctx.translate(sx, sy);
+      // trunk shadow
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(size * 0.4, size * 0.1, size * 0.9, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // trunk
+      ctx.fillStyle = "#5a4028";
+      ctx.fillRect(-size * 0.08, -size * 0.1, size * 0.16, size * 0.5);
+      // flat canopy (viewed slightly from above)
+      ctx.fillStyle = "#4f6b2a";
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.25, size * 1.0, size * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#5f7d33";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.2, -size * 0.32, size * 0.6, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case "mound": {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.fillStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(size * 0.2, size * 0.35, size * 0.9, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // conical termite mound
+      ctx.fillStyle = "#8a5a30";
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.7, size * 0.4);
+      ctx.quadraticCurveTo(-size * 0.2, -size * 1.1, size * 0.05, size * 0.4);
+      ctx.fill();
+      ctx.fillStyle = "#9c6a38";
+      ctx.beginPath();
+      ctx.moveTo(0, size * 0.4);
+      ctx.quadraticCurveTo(size * 0.35, -size * 0.7, size * 0.7, size * 0.4);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case "rock": {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(obj.rotation);
+      ctx.fillStyle = "#9a8a72";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size, size * 0.66, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.beginPath();
+      ctx.ellipse(size * 0.2, size * 0.2, size * 0.5, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case "grass": {
+      // Tall yellow grass tuft — primary cover, gently swaying.
+      ctx.save();
+      ctx.translate(sx, sy);
+      const rng = mulberry32(obj.rotation);
+      const sway = Math.sin(time * 0.0015 + obj.id) * 4;
+      const blades = 7 + Math.floor(rng() * 5);
+      for (let i = 0; i < blades; i++) {
+        const ox = (rng() - 0.5) * size * 1.2;
+        const bh = size * (0.7 + rng() * 0.6);
+        const sw = (rng() - 0.5) * 8 + sway;
+        ctx.strokeStyle = i % 2 === 0 ? "#c8a03a" : "#d8b64a";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(ox, 0);
+        ctx.quadraticCurveTo(ox + sw, -bh * 0.55, ox + sw * 1.5, -bh);
+        ctx.stroke();
+      }
+      ctx.restore();
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+export function isPointInSavannaCover(
+  px: number,
+  py: number,
+  env: SavannaEnvironment | null,
+): boolean {
+  if (!env) return false;
+  return env.objects.some((o) => {
+    if (o.kind === "grass") {
+      return Math.hypot(px - o.x, py - o.y) < o.size + 20;
+    }
+    if (o.kind === "acacia" || o.kind === "mound") {
+      return Math.hypot(px - o.x, py - o.y) < o.size + 8;
+    }
+    return false;
   });
 }

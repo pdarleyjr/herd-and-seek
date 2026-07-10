@@ -33,14 +33,21 @@ export default function LevelSelector({
           const level = LEVELS[id];
           const active = selectedLevel === id;
           const isOcean = level.biome === "ocean";
-          const accent = isOcean ? "#39c0e6" : "#5fd030";
+          const isSavannah = level.biome === "savannah";
+          const accent = isOcean ? "#39c0e6" : isSavannah ? "#f0a83a" : "#5fd030";
+          const icon = isOcean ? "🌊" : isSavannah ? "🌾" : "🌳";
+          const bannerBg = isOcean
+            ? "linear-gradient(180deg,#0b3a5a,#123f6e)"
+            : isSavannah
+              ? "linear-gradient(180deg,#7a4f16,#a5702a)"
+              : "linear-gradient(180deg,#1a3a08,#2f5a14)";
           const preview = level.allowedAnimals.slice(0, 4);
 
           return (
             <button
               key={id}
-              onPointerDown={(e) => {
-                e.preventDefault();
+              type="button"
+              onClick={() => {
                 if (!disabled) onSelectLevel(id);
               }}
               disabled={disabled}
@@ -54,19 +61,16 @@ export default function LevelSelector({
               ].join(" ")}
               style={{
                 borderColor: active ? accent : "#5a3a1a",
+                touchAction: "manipulation",
               }}
             >
               {/* Banner gradient header */}
               <div
                 className="absolute inset-x-0 top-0 h-8 rounded-t-xl pointer-events-none"
-                style={{
-                  background: isOcean
-                    ? "linear-gradient(180deg,#0b3a5a,#123f6e)"
-                    : "linear-gradient(180deg,#1a3a08,#2f5a14)",
-                }}
+                style={{ background: bannerBg }}
               />
               <div className="relative flex items-center gap-1.5 pt-1">
-                <span style={{ fontSize: 16, lineHeight: 1 }}>{isOcean ? "🌊" : "🌳"}</span>
+                <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
                 <span
                   className="font-extrabold text-[13px] leading-tight"
                   style={{ color: active ? "#fff" : "#f5d07a" }}
@@ -88,14 +92,14 @@ export default function LevelSelector({
               <div className="relative flex gap-1 mt-0.5">
                 {preview.map((a) => {
                   const def = ANIMAL_DEFS[a];
-                  const isPng = !def.ocean;
+                  const isPng = !def.ocean && !def.savannah;
                   return (
                     <div
                       key={a}
                       className="w-6 h-6 rounded-md flex items-center justify-center border"
                       style={{
                         borderColor: "#3a2a14",
-                        background: def.ocean ? `radial-gradient(circle at 50% 35%, ${def.color}, #06121f)` : "rgba(255,255,255,0.06)",
+                        background: isPng ? "rgba(255,255,255,0.06)" : `radial-gradient(circle at 50% 35%, ${def.color}, #06121f)`,
                       }}
                     >
                       {isPng ? (

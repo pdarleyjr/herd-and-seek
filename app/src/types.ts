@@ -5,22 +5,25 @@ export type AnimalType =
   | "panda" | "parrot" | "owl" | "snake"
   // Ocean roster (The Deep Dark)
   | "fish" | "turtle" | "crab" | "octopus"
-  | "jellyfish" | "shark" | "seahorse" | "stingray";
+  | "jellyfish" | "shark" | "seahorse" | "stingray"
+  // Savannah roster (Savannah at Dusk)
+  | "zebra" | "gazelle" | "wildebeest" | "warthog"
+  | "ostrich" | "meerkat" | "hyena" | "secretarybird";
 
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "PLAYING" | "ENDED";
 
 // ── Level system (shared shape — mirrored manually in worker/src/index.ts) ──
-export type LevelId = "forest" | "deepDark";
+export type LevelId = "forest" | "deepDark" | "savannah";
 
 export type LevelDefinition = {
   id: LevelId;
   displayName: string;
   subtitle: string;
-  biome: "forest" | "ocean";
+  biome: "forest" | "ocean" | "savannah";
   description: string;
-  hunterSkin: "hunter" | "scuba";
-  mapTheme: "forest" | "ocean";
+  hunterSkin: "hunter" | "scuba" | "ranger";
+  mapTheme: "forest" | "ocean" | "savannah";
   allowedAnimals: AnimalType[];
 };
 
@@ -32,6 +35,11 @@ export const FOREST_ANIMALS: AnimalType[] = [
 export const OCEAN_ANIMALS: AnimalType[] = [
   "fish", "turtle", "crab", "octopus",
   "jellyfish", "shark", "seahorse", "stingray",
+];
+
+export const SAVANNAH_ANIMALS: AnimalType[] = [
+  "zebra", "gazelle", "wildebeest", "warthog",
+  "ostrich", "meerkat", "hyena", "secretarybird",
 ];
 
 export const LEVELS: Record<LevelId, LevelDefinition> = {
@@ -55,12 +63,22 @@ export const LEVELS: Record<LevelId, LevelDefinition> = {
     mapTheme: "ocean",
     allowedAnimals: OCEAN_ANIMALS,
   },
+  savannah: {
+    id: "savannah",
+    displayName: "Savannah at Dusk",
+    subtitle: "Blend into tall grass, acacia shade, and long sunset shadows.",
+    biome: "savannah",
+    description: "A golden savannah at dusk: hide in tall grass, behind termite mounds and acacia trees while the ranger tracks the herd.",
+    hunterSkin: "ranger",
+    mapTheme: "savannah",
+    allowedAnimals: SAVANNAH_ANIMALS,
+  },
 };
 
-export const LEVEL_ORDER: LevelId[] = ["forest", "deepDark"];
+export const LEVEL_ORDER: LevelId[] = ["forest", "deepDark", "savannah"];
 
 export function isValidLevelId(id: unknown): id is LevelId {
-  return id === "forest" || id === "deepDark";
+  return id === "forest" || id === "deepDark" || id === "savannah";
 }
 
 export function animalsForLevel(levelId: LevelId): AnimalType[] {
@@ -154,6 +172,7 @@ export interface AnimalDef {
   label: string;
   emoji: string;
   ocean?: boolean;
+  savannah?: boolean;
   /** Procedural fallback base color used when no PNG sprite exists. */
   color?: string;
   description?: string;
@@ -187,6 +206,15 @@ export const ANIMAL_OPTIONS: AnimalDef[] = [
   { value: "shark", label: "Shark", emoji: "🦈", ocean: true, color: "#5a7090", description: "Larger decoy — intimidating but obvious." },
   { value: "seahorse", label: "Seahorse", emoji: "🐡", ocean: true, color: "#f5d030", description: "Small and tricky among kelp." },
   { value: "stingray", label: "Stingray", emoji: "🌊", ocean: true, color: "#1f6a6a", description: "Flat, blends in dark water." },
+  // Savannah (Savannah at Dusk) — no PNG assets; rendered procedurally.
+  { value: "zebra", label: "Zebra", emoji: "🦓", savannah: true, color: "#e8e6df", description: "Striped herd animal — hides in the pack." },
+  { value: "gazelle", label: "Gazelle", emoji: "🦌", savannah: true, color: "#c99a5b", description: "Fast and light on its feet." },
+  { value: "wildebeest", label: "Wildebeest", emoji: "🐃", savannah: true, color: "#5c534a", description: "Bulky calf; blends in the great herd." },
+  { value: "warthog", label: "Warthog", emoji: "🐗", savannah: true, color: "#7a5a3a", description: "Low and quick near termite mounds." },
+  { value: "ostrich", label: "Ostrich", emoji: "🦤", savannah: true, color: "#3a3230", description: "Tall runner; sprints across open ground." },
+  { value: "meerkat", label: "Meerkat", emoji: "🦫", savannah: true, color: "#b89a6a", description: "Tiny lookout; slips into the grass." },
+  { value: "hyena", label: "Hyena Pup", emoji: "🐕", savannah: true, color: "#9a8560", description: "Spotted pup; blends near cover." },
+  { value: "secretarybird", label: "Secretary Bird", emoji: "🦅", savannah: true, color: "#c8c2b4", description: "Long-legged strider of the grass." },
 ];
 
 export const ANIMAL_DEFS: Record<AnimalType, AnimalDef> = ANIMAL_OPTIONS.reduce(
@@ -242,6 +270,8 @@ export const ALL_ANIMAL_TYPES: AnimalType[] = [
   "panda", "parrot", "owl", "snake",
   "fish", "turtle", "crab", "octopus",
   "jellyfish", "shark", "seahorse", "stingray",
+  "zebra", "gazelle", "wildebeest", "warthog",
+  "ostrich", "meerkat", "hyena", "secretarybird",
 ];
 
 export interface SyncStateMessage {
@@ -281,11 +311,45 @@ export interface GameOverMessage {
   payload: GameOverPayload;
 }
 
+export interface AdminAuditEntry {
+  ts: number;
+  adminId: string;
+  action: string;
+  detail: string;
+}
+
+export interface AdminOkMessage {
+  type: "ADMIN_OK";
+  payload: { auditLog: AdminAuditEntry[]; state: SerializedState };
+}
+
+export interface AdminDeniedMessage {
+  type: "ADMIN_DENIED";
+  payload: Record<string, never>;
+}
+
+export interface AdminLogMessage {
+  type: "ADMIN_LOG";
+  payload: { auditLog: AdminAuditEntry[] };
+}
+
 export type ServerMessage =
   | SyncStateMessage
   | MatchStartMessage
   | HitMessage
-  | GameOverMessage;
+  | GameOverMessage
+  | AdminOkMessage
+  | AdminDeniedMessage
+  | AdminLogMessage;
+
+export type AdminCommand =
+  | "reset_room"
+  | "end_match"
+  | "force_start"
+  | "set_level"
+  | "set_duration"
+  | "kick"
+  | "clear_bots";
 
 export type ClientMessage =
   | { type: "READY"; payload?: ReadyPayload }
@@ -297,4 +361,15 @@ export type ClientMessage =
   | { type: "DECOY"; payload?: DecoyPayload }
   | { type: "SET_DURATION"; payload: SetDurationPayload }
   | { type: "START_SOLO"; payload: StartSoloPayload }
-  | { type: "SELECT_LEVEL"; payload: SelectLevelPayload };
+  | { type: "SELECT_LEVEL"; payload: SelectLevelPayload }
+  | { type: "ADMIN_AUTH"; payload: { adminKey: string } }
+  | {
+      type: "ADMIN_CMD";
+      payload: {
+        command: AdminCommand;
+        levelId?: LevelId;
+        duration?: number;
+        targetId?: string;
+        botCount?: number;
+      };
+    };
