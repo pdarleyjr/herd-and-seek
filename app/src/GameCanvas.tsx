@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { type AssetMap, type AssetKey, getAsset } from "./AssetLoader";
+import { type AssetMap, type AssetKey, getAsset, drawSprite } from "./AssetLoader";
 import { useViewportInfo } from "./hooks/useViewportInfo";
 import {
   type SerializedState,
@@ -122,8 +122,8 @@ interface GameCanvasProps {
 
 function getAnimalImage(
   assets: AssetMap,
-  type: AnimalType
-): HTMLImageElement | null {
+  type: AnimalType,
+): HTMLImageElement | ImageBitmap | null {
   // Only forest animals have PNG sprites. Ocean/savannah animals are procedural.
   if (isOceanAnimal(type) || isSavannaAnimal(type)) return null;
   return getAsset(assets, type as Extract<AssetKey, AnimalType>);
@@ -395,12 +395,9 @@ export default function GameCanvas({
       }
 
       const drawTree = (sx: number, sy: number, type: TreeEntity["type"]) => {
-        const tree = type === "bush" ? getAsset(assets, "bush") : type === "brown" ? getAsset(assets, "treeBrown") : getAsset(assets, "tree");
-        if (tree) {
-          const size = type === "bush" ? 52 : 88;
-          lctx.drawImage(tree, sx - size / 2, sy - size / 2, size, size);
-          return;
-        }
+        const key: AssetKey = type === "bush" ? "bush" : type === "brown" ? "treeBrown" : "tree";
+        const size = type === "bush" ? 52 : 88;
+        if (drawSprite(lctx, assets, key, sx, sy, size, size)) return;
 
         lctx.save();
         lctx.translate(sx, sy);
@@ -967,7 +964,7 @@ export default function GameCanvas({
     interface RenderItem {
       x: number;
       y: number;
-      img?: HTMLImageElement;
+      img?: HTMLImageElement | ImageBitmap;
       drawFn?: (sx: number, sy: number) => void;
       rotation: number;
       size: number;
@@ -985,12 +982,15 @@ export default function GameCanvas({
 
     // Resolve an animal's visual: PNG sprite (forest) or procedural drawFn (ocean).
     const animalSprite = (type: AnimalType, vx: number): {
-      img?: HTMLImageElement;
+      img?: HTMLImageElement | ImageBitmap;
       drawFn?: (sx: number, sy: number) => void;
       flipX?: boolean;
     } => {
       const img = getAnimalImage(assets, type);
-      if (img) return { img, flipX: vx < -0.1 };
+      if (img) {
+        const key = type as AssetKey;
+        return { drawFn: (sx, sy) => drawSprite(ctx, assets, key, sx, sy, 64, 64, { flipX: vx < -0.1 }), flipX: vx < -0.1 };
+      }
       if (isOceanAnimal(type)) {
         return {
           drawFn: (sx, sy) => drawOceanAnimal(ctx, type, sx, sy, 64, vx),
@@ -1048,7 +1048,7 @@ export default function GameCanvas({
       const py = isLocal ? localPosRef.current.y : (remoteRender?.renderY ?? p.y);
 
       // Pick the visual. Ocean hunter → scuba diver; ocean animals → procedural.
-      let img: HTMLImageElement | undefined;
+      let img: HTMLImageElement | ImageBitmap | undefined;
       let drawFn: ((sx: number, sy: number) => void) | undefined;
       let rotation = 0;
       let alpha = 1;
@@ -1074,7 +1074,9 @@ export default function GameCanvas({
             drawRangerHunter(ctx, sx, sy, aimAngleRef.current, moving, 64);
           shadow = false; // ranger drawFn paints its own shadow
         } else {
-          img = getAsset(assets, "hunter") ?? undefined;
+          const hk: AssetKey = "hunter";
+          drawFn = (sx, sy) =>
+            drawSprite(ctx, assets, hk, sx, sy, 64, 64, { rotation: hunterAngleRef.current });
         }
       } else {
         const sp = animalSprite(p.animalType, 0);
@@ -1111,21 +1113,18 @@ export default function GameCanvas({
 
     if (!hasForestStaticLayer) {
       for (const t of treesRef.current) {
-        const img = t.type === "bush"
-          ? getAsset(assets, "bush") ?? undefined
-          : t.type === "brown"
-            ? getAsset(assets, "treeBrown") ?? undefined
-            : getAsset(assets, "tree") ?? undefined;
+        const key: AssetKey = t.type === "bush" ? "bush" : t.type === "brown" ? "treeBrown" : "tree";
+        const size = t.type === "bush" ? 52 : 88;
         renderArray.push({
           x: t.x,
           y: t.y,
-          img,
           rotation: 0,
-          size: t.type === "bush" ? 52 : 88,
+          size,
           isEntity: false,
           shadow: t.type !== "bush",
           alpha: 1,
           glow: null,
+          drawFn: (sx: number, sy: number) => drawSprite(ctx, assets, key, sx, sy, size, size),
         });
       }
 

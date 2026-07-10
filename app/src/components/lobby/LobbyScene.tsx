@@ -37,6 +37,7 @@ interface LobbySceneProps {
   onReady: () => void;
   onStartSolo?: () => void;
   onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
+  onOpenWorld?: () => void;
 }
 
 export default function LobbyScene({
@@ -54,6 +55,7 @@ export default function LobbyScene({
   onReady,
   onStartSolo,
   onSoloWithBots,
+  onOpenWorld,
 }: LobbySceneProps) {
   const { layoutMode, isPhone } = useViewportInfo();
 
@@ -159,6 +161,23 @@ export default function LobbyScene({
           </div>
           {onStartSolo && playerCount < 2 && (
             <SoloBotSelector onStartSolo={onStartSolo} onSoloWithBots={onSoloWithBots} />
+          )}
+          {onOpenWorld && (
+            <button
+              type="button"
+              onClick={() => onOpenWorld()}
+              aria-label="Enter the Savannah Reserve open world"
+              className="w-full max-w-[220px] py-2 rounded-xl font-bold text-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7fe0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1f6a8c]"
+              style={{
+                background: "linear-gradient(180deg,#3aa0d0,#1f6a8c)",
+                border: "2px solid #7fe0ff",
+                color: "#fff",
+                touchAction: "manipulation",
+              }}
+              title="Roam the Savannah Reserve, complete quests, collect coins, and upgrade your profile."
+            >
+              🌍 Open World
+            </button>
           )}
           <PlayerList gameState={gameState} userId={userId} />
         </div>

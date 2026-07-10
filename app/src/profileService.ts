@@ -3,61 +3,17 @@
 // Persistence architecture (per the audit): the authoritative profile lives in
 // a Cloudflare Durable Object; we cache the last-known profile in IndexedDB for
 // instant boot / offline-friendly menus and reconcile with the server whenever
-// we can reach it.
+// we can reach it. The cache is implemented in ./storage/profileCache and is
+// never authoritative for economy values.
 import type { PlayerProfile } from "./economy";
+import {
+  readCachedProfile,
+  writeCachedProfile,
+} from "./storage/profileCache";
 
 const API_BASE = "https://herd-and-seek-backend.pdarleyjr.workers.dev/api/profile";
-const DB_NAME = "herd-and-seek";
-const STORE = "profiles";
 
-function openDb(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") return resolve(null);
-    try {
-      const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(STORE)) {
-          db.createObjectStore(STORE, { keyPath: "userId" });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-export async function readCachedProfile(userId: string): Promise<PlayerProfile | null> {
-  const db = await openDb();
-  if (!db) return null;
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).get(userId);
-      req.onsuccess = () => resolve((req.result as PlayerProfile) ?? null);
-      req.onerror = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-export async function writeCachedProfile(profile: PlayerProfile): Promise<void> {
-  const db = await openDb();
-  if (!db) return;
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(profile);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
-}
+export { readCachedProfile, writeCachedProfile };
 
 async function apiCall(
   action: string,
@@ -108,10 +64,10 @@ export async function purchaseCosmetic(
     const data = (await res.json().catch(() => null)) as
       | (PlayerProfile & { error?: string })
       | null;
-    if (data && data.userId) {
-      await writeCachedProfile(data);
-      return { ok: !("error" in data && data.error), profile: data, error: (data as { error?: string }).error };
-    }
+      if (data && data.userId) {
+        await writeCachedProfile(data);
+        return { ok: !("error" in data && data.error), profile: data, error: (data as { error?: string }).error };
+      }
     return { ok: false, profile: null, error: data?.error ?? "network_error" };
   } catch {
     return { ok: false, profile: null, error: "network_error" };

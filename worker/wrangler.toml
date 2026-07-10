@@ -2,10 +2,19 @@ name = "herd-and-seek-backend"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
-[vars]
-# Default admin passphrase. Override in production with:
+# ── Secrets (NEVER commit real values) ───────────────────────────────────────
+# Set these with the wrangler CLI before deploying:
 #   npx wrangler secret put ADMIN_KEY
-ADMIN_KEY = "herd-admin"
+#   npx wrangler secret put INTERNAL_REWARD_SECRET
+#
+# ADMIN_KEY            — required for the admin control plane. If unset, all
+#                        admin actions are disabled (403).
+# INTERNAL_REWARD_SECRET — server-only. Authorizes match/quest/collectible
+#                        reward grants. The browser can never obtain it.
+#                        Generate with:  openssl rand -hex 32
+#
+# Previously a default "herd-admin" was committed here — that has been removed
+# because it was a publicly-guessable credential. Rotate it now.
 
 [[durable_objects.bindings]]
 name = "GAME_ROOM"
@@ -15,6 +24,10 @@ class_name = "GameRoomDurableObject"
 name = "PLAYER_PROFILE"
 class_name = "PlayerProfileDurableObject"
 
+[[durable_objects.bindings]]
+name = "OPEN_WORLD_ZONE"
+class_name = "OpenWorldZoneDurableObject"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["GameRoomDurableObject"]
@@ -22,3 +35,7 @@ new_classes = ["GameRoomDurableObject"]
 [[migrations]]
 tag = "v2"
 new_classes = ["PlayerProfileDurableObject"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["OpenWorldZoneDurableObject"]

@@ -6,6 +6,7 @@ import HomeScreen from "./components/home/HomeScreen";
 import ProfileBar from "./components/economy/ProfileBar";
 import ShopModal from "./components/economy/ShopModal";
 import AdminPanel from "./components/admin/AdminPanel";
+import OpenWorldScreen from "./open-world/OpenWorldScreen";
 import { useGameSocket } from "./useGameSocket";
 import { useViewportInfo } from "./hooks/useViewportInfo";
 import { useProfile } from "./hooks/useProfile";
@@ -22,7 +23,7 @@ import {
 } from "./types";
 import { soundManager } from "./SoundManager";
 
-type Screen = "AUTH" | "LOBBY" | "GAME";
+type Screen = "AUTH" | "LOBBY" | "GAME" | "OPEN_WORLD";
 
 function readSavedSession() {
   if (typeof window === "undefined") {
@@ -94,6 +95,10 @@ export default function App() {
     setUsername(name);
     setScreen("LOBBY");
   }, [nameInput]);
+
+  const handleOpenWorld = useCallback(() => {
+    setScreen("OPEN_WORLD");
+  }, []);
 
   const onEvent = useCallback((msg: string) => {
     setEventLog((prev) => [msg, ...prev].slice(0, 8));
@@ -250,6 +255,17 @@ export default function App() {
     );
   }
 
+  if (screen === "OPEN_WORLD") {
+    return (
+      <OpenWorldScreen
+        userId={userId}
+        username={username}
+        animalType="zebra"
+        onExit={() => setScreen("LOBBY")}
+      />
+    );
+  }
+
   if (screen === "LOBBY" && (!gameState || gameState.phase === "LOBBY")) {
     return (
       <>
@@ -289,6 +305,7 @@ export default function App() {
           onSoloWithBots={(role, botCount) => {
             send({ type: "START_SOLO", payload: { role, botCount } });
           }}
+          onOpenWorld={handleOpenWorld}
         />
 
         {/* Wallet pill (top-center overlay) */}

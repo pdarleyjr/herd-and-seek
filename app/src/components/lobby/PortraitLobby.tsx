@@ -32,6 +32,7 @@ interface PortraitLobbyProps {
   onReady: () => void;
   onStartSolo?: () => void;
   onSoloWithBots?: (role: "hunter" | "animal" | "random", botCount: number) => void;
+  onOpenWorld?: () => void;
   compact?: boolean;
 }
 
@@ -56,6 +57,7 @@ export default function PortraitLobby({
   onReady,
   onStartSolo,
   onSoloWithBots,
+  onOpenWorld,
   compact = false,
 }: PortraitLobbyProps) {
   const [tab, setTab] = useState<Tab>("morphs");
@@ -399,6 +401,26 @@ export default function PortraitLobby({
           <p className="text-center text-[#c8a05a] text-xs animate-pulse">
             Waiting for others to ready up...
           </p>
+        )}
+
+        {onOpenWorld && (
+          <button
+            type="button"
+            onClick={() => onOpenWorld()}
+            aria-label="Enter the Savannah Reserve open world"
+            className="w-full rounded-2xl font-extrabold text-base uppercase tracking-wide select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7fe0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1f6a8c]"
+            style={{
+              minHeight: 52,
+              background: "linear-gradient(180deg,#3aa0d0,#1f6a8c)",
+              border: "2px solid #7fe0ff",
+              color: "#fff",
+              textShadow: "0 1px 3px rgba(0,0,0,0.4)",
+              touchAction: "manipulation",
+            }}
+            title="Roam the Savannah Reserve, complete quests, collect coins, and upgrade your profile."
+          >
+            🌍 Open World
+          </button>
         )}
       </div>
     </div>
