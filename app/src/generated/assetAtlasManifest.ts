@@ -35,7 +35,7 @@ export interface AssetAtlasManifest {
 
 export const ATLAS_MANIFEST: AssetAtlasManifest = {
   "version": 1,
-  "generatedAt": "2026-07-10T23:50:55.929Z",
+  "generatedAt": "2026-07-10T23:54:26.443Z",
   "atlases": [
     {
       "id": "forest@1x",
