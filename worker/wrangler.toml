@@ -28,6 +28,14 @@ class_name = "PlayerProfileDurableObject"
 name = "OPEN_WORLD_ZONE"
 class_name = "OpenWorldZoneDurableObject"
 
+[[durable_objects.bindings]]
+name = "ROOM_DIRECTORY"
+class_name = "RoomDirectoryDurableObject"
+
+[[durable_objects.bindings]]
+name = "SOCCER_ROOM"
+class_name = "SoccerRoomDurableObject"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["GameRoomDurableObject"]
@@ -39,3 +47,11 @@ new_classes = ["PlayerProfileDurableObject"]
 [[migrations]]
 tag = "v3"
 new_classes = ["OpenWorldZoneDurableObject"]
+
+[[migrations]]
+tag = "v4"
+new_classes = ["RoomDirectoryDurableObject"]
+
+[[migrations]]
+tag = "v5"
+new_classes = ["SoccerRoomDurableObject"]

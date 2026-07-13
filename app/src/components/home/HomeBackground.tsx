@@ -7,7 +7,7 @@ export default function HomeBackground() {
       <div
         className="absolute inset-0"
         style={{
-          background: "linear-gradient(180deg, #1a88d8 0%, #4ab8f0 30%, #88d8f8 55%, #c8ecf8 72%, #dff0e0 82%, #a8d870 92%, #68b840 100%)",
+          background: "linear-gradient(180deg, #498099 0%, #30c0b7 42%, #bdeae0 68%, #fff5de 82%, #fd8083 100%)",
         }}
       />
 
@@ -19,7 +19,7 @@ export default function HomeBackground() {
           height: 140,
           top: "6%",
           left: "52%",
-          background: "radial-gradient(circle at 38% 35%, #fffde0 0%, #ffe060 35%, #ffb800 65%, transparent 100%)",
+          background: "radial-gradient(circle at 38% 35%, #fff5de 0%, #ffd45c 55%, #ee227d 72%, transparent 74%)",
           animation: "sunPulse 5s ease-in-out infinite",
         }}
       />
@@ -64,16 +64,16 @@ export default function HomeBackground() {
       >
         <defs>
           <linearGradient id="farMtnGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#c0d4ec"/>
-            <stop offset="100%" stopColor="#8aaed0"/>
+            <stop offset="0%" stopColor="#c7e8e4"/>
+            <stop offset="100%" stopColor="#498099"/>
           </linearGradient>
           <linearGradient id="midMtnGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8aaad0"/>
-            <stop offset="100%" stopColor="#5a80a8"/>
+            <stop offset="0%" stopColor="#fd8083"/>
+            <stop offset="100%" stopColor="#852467"/>
           </linearGradient>
           <linearGradient id="nearMtnGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6080a0"/>
-            <stop offset="100%" stopColor="#3a5870"/>
+            <stop offset="0%" stopColor="#852467"/>
+            <stop offset="100%" stopColor="#3b0855"/>
           </linearGradient>
         </defs>
 
@@ -151,7 +151,7 @@ export default function HomeBackground() {
         style={{
           bottom: "14%",
           height: "20%",
-          background: "linear-gradient(180deg, transparent 0%, rgba(210,170,80,0.18) 40%, rgba(180,140,50,0.25) 100%)",
+          background: "linear-gradient(180deg, transparent 0%, rgba(255,245,222,0.3) 40%, rgba(253,128,131,0.28) 100%)",
         }}
       />
 
@@ -160,7 +160,7 @@ export default function HomeBackground() {
         className="absolute left-0 right-0 bottom-0"
         style={{
           height: "26%",
-          background: "linear-gradient(180deg, #78c840 0%, #52a028 40%, #3a8018 80%, #286010 100%)",
+          background: "linear-gradient(180deg, #86c96b 0%, #4fa65e 42%, #28735f 82%, #19534e 100%)",
         }}
       />
 
@@ -191,7 +191,7 @@ export default function HomeBackground() {
       {/* ── 8. Foreground dark grass strip ── */}
       <div
         className="absolute left-0 right-0 bottom-0"
-        style={{ height: "12%", background: "linear-gradient(180deg, #2a7818 0%, #1a5010 100%)" }}
+        style={{ height: "12%", background: "linear-gradient(180deg, #28735f 0%, #3b0855 100%)" }}
       />
     </div>
   );

@@ -19,25 +19,25 @@
   --radius-lg: 20px;
   --radius-xl: 28px;
 
-  --surface-1: rgba(28, 18, 8, 0.92);
-  --surface-2: rgba(20, 13, 5, 0.96);
-  --surface-overlay: rgba(10, 7, 3, 0.94);
+  --surface-1: rgba(255, 245, 222, 0.96);
+  --surface-2: rgba(255, 255, 255, 0.98);
+  --surface-overlay: rgba(59, 8, 85, 0.96);
 
-  --text-primary: #f7ecd2;
-  --text-secondary: #d8c39a;
-  --text-muted: #a8916a;
+  --text-primary: #3b0855;
+  --text-secondary: #694076;
+  --text-muted: #852467;
 
-  --line: rgba(245, 208, 122, 0.22);
-  --line-strong: rgba(245, 208, 122, 0.45);
+  --line: #3b0855;
+  --line-strong: #3b0855;
 
-  --accent-forest: #7fff00;
-  --accent-ocean: #39c0e6;
-  --accent-savannah: #f0a83a;
-  --accent-danger: #ff5a5a;
-  --accent-reward: #ffcf33;
+  --accent-forest: #30c0b7;
+  --accent-ocean: #498099;
+  --accent-savannah: #fd8083;
+  --accent-danger: #ee227d;
+  --accent-reward: #ffd45c;
 
-  --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --shadow-focus: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 5px rgba(245, 208, 122, 0.6);
+  --shadow-panel: 0 7px 0 #3b0855, 0 16px 30px rgba(59, 8, 85, 0.25);
+  --shadow-focus: 0 0 0 3px #fff5de, 0 0 0 7px #ffd45c;
 
   --hud-safe-top: env(safe-area-inset-top, 0px);
   --hud-safe-right: env(safe-area-inset-right, 0px);
@@ -58,10 +58,8 @@
   flex-direction: column;
   min-height: 0;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(61, 34, 16, 0.55), rgba(20, 12, 5, 0.75)),
-    radial-gradient(120% 80% at 50% 0%, rgba(245, 208, 122, 0.08), transparent 60%);
+  border: 4px solid var(--line);
+  background: var(--surface-1);
   box-shadow: var(--shadow-panel);
   color: var(--text-primary);
   overflow: hidden;
@@ -73,8 +71,8 @@
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.18);
+  border-bottom: 3px solid var(--line);
+  background: #fd8083;
 }
 
 .game-panel__title {
@@ -107,8 +105,8 @@
   min-height: 44px;
   padding: 10px 16px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--line-strong);
-  background: rgba(61, 34, 16, 0.7);
+  border: 3px solid var(--line-strong);
+  background: #fff5de;
   color: var(--text-primary);
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -117,31 +115,31 @@
   touch-action: manipulation;
   transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
 }
-.game-button:hover { filter: brightness(1.08); }
-.game-button:active { transform: scale(0.97); }
+.game-button{box-shadow:0 4px 0 #3b0855;font-weight:900}
+.game-button:hover { filter: brightness(1.04); transform:translateY(-1px) }
+.game-button:active { transform: translateY(2px); box-shadow:0 2px 0 #3b0855 }
 .game-button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
 .game-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .game-button--primary {
-  background: linear-gradient(180deg, #3db02a, #1f7c10);
+  background: #30c0b7;
   border-color: var(--accent-forest);
-  color: #fff;
-  box-shadow: 0 0 22px rgba(127, 255, 0, 0.35);
+  color: #3b0855;
 }
 .game-button--savannah {
-  background: linear-gradient(180deg, #3aa0d0, #1f6a8c);
-  border-color: #7fe0ff;
-  color: #fff;
+  background: #498099;
+  border-color: #3b0855;
+  color: #fff5de;
 }
 .game-button--gold {
-  background: linear-gradient(180deg, #e8b520, #b88c0a);
-  border-color: #f5d07a;
-  color: #1a0f05;
+  background: #ffd45c;
+  border-color: #3b0855;
+  color: #3b0855;
 }
 .game-button--danger {
-  background: linear-gradient(180deg, #ff6a6a, #c0303a);
-  border-color: #ffb4b4;
-  color: #fff;
+  background: #ee227d;
+  border-color: #3b0855;
+  color: #fff5de;
 }
 
 /* ── Progress + status ───────────────────────────────────────────────────── */
@@ -149,13 +147,14 @@
   height: 8px;
   width: 100%;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.4);
+  border: 2px solid #3b0855;
+  background: #d9c4d9;
   overflow: hidden;
 }
 .progress__fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent-savannah), var(--accent-reward));
+  background: var(--accent-forest);
   transition: width 0.3s ease;
 }
 
@@ -167,8 +166,8 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid var(--line);
+  background: #fff5de;
 }
 .status-pill--ok { color: var(--accent-forest); border-color: rgba(127, 255, 0, 0.5); }
 .status-pill--bad { color: var(--accent-danger); border-color: rgba(255, 90, 90, 0.5); }

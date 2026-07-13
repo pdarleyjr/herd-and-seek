@@ -1,4 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
+
+export { SoccerRoomDurableObject } from "./soccerRoom";
 // Herd & Seek — backend Worker
 //
 // Modes:
@@ -145,11 +147,37 @@ export function allowedMovementDistance(
 
 export function safeMatchSpawn(index: number): { x: number; y: number } {
   const slot = Math.max(0, Math.floor(index)) % 16;
-  return { x: 110 + (slot % 4) * 90, y: 110 + Math.floor(slot / 4) * 90 };
+  if (slot === 0) return { x: 1_400, y: 1_400 };
+  const ring = slot <= 8 ? 520 : 820;
+  const count = slot <= 8 ? 8 : 7;
+  const position = slot <= 8 ? slot - 1 : slot - 9;
+  const angle = position / count * Math.PI * 2 - Math.PI / 2;
+  return { x: Math.round(1_400 + Math.cos(angle) * ring), y: Math.round(1_400 + Math.sin(angle) * ring) };
 }
 
+export interface DifficultyTuning {
+  movement: number;
+  animalDecisionMs: number;
+  animalDecisionJitterMs: number;
+  patrolChance: number;
+  patrolSpeed: number;
+  chaseSpeed: number;
+  shootRange: number;
+  shotCooldownMs: number;
+  shotSpread: number;
+  humanHunterAmmo: number;
+  aiHunterAmmo: number;
+  rewardMultiplier: number;
+}
+
+export const DIFFICULTY_TUNING: Record<SoloDifficulty, DifficultyTuning> = {
+  easy: { movement: 0.72, animalDecisionMs: 1_550, animalDecisionJitterMs: 2_100, patrolChance: 0.72, patrolSpeed: 135, chaseSpeed: 175, shootRange: 215, shotCooldownMs: 5_200, shotSpread: 310, humanHunterAmmo: 14, aiHunterAmmo: 6, rewardMultiplier: 0.65 },
+  normal: { movement: 1, animalDecisionMs: 900, animalDecisionJitterMs: 1_450, patrolChance: 0.5, patrolSpeed: 185, chaseSpeed: 245, shootRange: 265, shotCooldownMs: 3_000, shotSpread: 155, humanHunterAmmo: 9, aiHunterAmmo: 9, rewardMultiplier: 1 },
+  hard: { movement: 1.38, animalDecisionMs: 380, animalDecisionJitterMs: 620, patrolChance: 0.2, patrolSpeed: 235, chaseSpeed: 325, shootRange: 335, shotCooldownMs: 1_350, shotSpread: 55, humanHunterAmmo: 6, aiHunterAmmo: 14, rewardMultiplier: 1.6 },
+};
+
 export function difficultyMultiplier(difficulty: SoloDifficulty): number {
-  return difficulty === "easy" ? 0.78 : difficulty === "hard" ? 1.22 : 1;
+  return DIFFICULTY_TUNING[difficulty].movement;
 }
 
 export function collectibleInRange(player: { x: number; y: number }, node: { x: number; y: number }, maxDistance = 260): boolean {
@@ -190,7 +218,7 @@ interface RoomState {
 export type GameMode = "match" | "openWorld";
 export type ZoneId = "savannahReserve";
 export type DistrictId =
-  | "lodge" | "grasslands" | "wateringHole" | "ridgeTrail" | "acaciaGrove";
+  | "lodge" | "grasslands" | "wateringHole" | "ridgeTrail" | "acaciaGrove" | "moonfernForest" | "strikerField";
 
 export type QuestId =
   | "daily_scout_tracks"
@@ -322,8 +350,9 @@ export function questById(id: QuestId): QuestDefinition | undefined {
   return QUEST_CATALOG.find((q) => q.id === id);
 }
 
-const OW_WORLD_SIZE = 3000;
+const OW_WORLD_SIZE = 6000;
 const COLLECTIBLE_RESPAWN_MS = 30_000;
+const OW_LAYOUT_VERSION = 2;
 
 export function questCatalogForTest(): readonly QuestDefinition[] { return QUEST_CATALOG; }
 
@@ -350,11 +379,13 @@ function seededPrng(seedStr: string): () => number {
 }
 
 const DISTRICTS: { id: DistrictId; cx: number; cy: number; spread: number }[] = [
-  { id: "lodge", cx: 1500, cy: 1500, spread: 220 },
-  { id: "grasslands", cx: 650, cy: 1500, spread: 700 },
-  { id: "wateringHole", cx: 2300, cy: 2250, spread: 260 },
-  { id: "ridgeTrail", cx: 1500, cy: 420, spread: 380 },
-  { id: "acaciaGrove", cx: 2300, cy: 820, spread: 360 },
+  { id: "lodge", cx: 3000, cy: 3000, spread: 260 },
+  { id: "grasslands", cx: 1300, cy: 3200, spread: 980 },
+  { id: "wateringHole", cx: 4750, cy: 4450, spread: 460 },
+  { id: "ridgeTrail", cx: 3100, cy: 750, spread: 620 },
+  { id: "acaciaGrove", cx: 4750, cy: 1450, spread: 620 },
+  { id: "moonfernForest", cx: 1050, cy: 1050, spread: 760 },
+  { id: "strikerField", cx: 4750, cy: 3000, spread: 480 },
 ];
 
 function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNode[] {
@@ -365,11 +396,17 @@ function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNod
   const nodes: CollectibleNode[] = [];
   let n = 0;
   for (const d of DISTRICTS) {
-    const count = d.id === "grasslands" ? 12 : d.id === "wateringHole" ? 6 : 7;
+    const count = d.id === "grasslands" ? 22 : d.id === "wateringHole" ? 12 : d.id === "lodge" ? 8 : 14;
     for (let i = 0; i < count; i++) {
       const kind = kinds[Math.floor(rnd() * kinds.length)];
-      const x = Math.max(80, Math.min(OW_WORLD_SIZE - 80, d.cx + (rnd() - 0.5) * d.spread * 2));
-      const y = Math.max(80, Math.min(OW_WORLD_SIZE - 80, d.cy + (rnd() - 0.5) * d.spread * 2));
+      const angle = i / count * Math.PI * 2 + rnd() * 0.22;
+      const lodgeRadius = 82 + (i % 3) * 48;
+      const x = d.id === "lodge"
+        ? d.cx + Math.cos(angle) * lodgeRadius
+        : Math.max(80, Math.min(OW_WORLD_SIZE - 80, d.cx + (rnd() - 0.5) * d.spread * 2));
+      const y = d.id === "lodge"
+        ? d.cy + Math.sin(angle) * lodgeRadius
+        : Math.max(80, Math.min(OW_WORLD_SIZE - 80, d.cy + (rnd() - 0.5) * d.spread * 2));
       nodes.push({
         id: `${zoneId}:${dailySeed}:${n++}`,
         x: Math.round(x),
@@ -449,8 +486,10 @@ interface OpenWorldServerMessage {
 // ── Environment / persistence interfaces ─────────────────────────────────────
 interface Env {
   GAME_ROOM: DurableObjectNamespace;
+  SOCCER_ROOM: DurableObjectNamespace;
   PLAYER_PROFILE: DurableObjectNamespace;
   OPEN_WORLD_ZONE: DurableObjectNamespace;
+  ROOM_DIRECTORY: DurableObjectNamespace;
   ADMIN_KEY?: string;
   INTERNAL_REWARD_SECRET?: string;
 }
@@ -536,6 +575,8 @@ import {
   type EconomyLedgerEntry,
   type MatchStats,
 } from "./economy";
+
+export { RoomDirectoryDurableObject } from "./roomDirectory";
 
 export class PlayerProfileDurableObject implements DurableObject {
   constructor(public ctx: DurableObjectState, public env: Env) {}
@@ -664,7 +705,7 @@ export class PlayerProfileDurableObject implements DurableObject {
 }
 
 // ── Match-mode room ───────────────────────────────────────────────────────────
-const WORLD_SIZE = 2000;
+const WORLD_SIZE = 2800;
 const PLAYER_COLLISION_RADIUS = 34;
 const MATCH_DURATION_DEFAULT = 120;
 const MATCH_DURATION_MIN = 30;
@@ -719,6 +760,8 @@ export class GameRoomDurableObject implements DurableObject {
   auditLog: AdminAuditEntry[] = [];
   private readonly sockets = new Set<WebSocket>();
   private readonly socketAttachments = new WeakMap<WebSocket, { userId: string; username: string; connectionId: string }>();
+  private directoryRoomId: string | null = null;
+  private lastDirectorySnapshot = "";
 
   private static readonly STORAGE_KEY = "room_snapshot_v1";
 
@@ -750,6 +793,11 @@ export class GameRoomDurableObject implements DurableObject {
       return new Response("Expected WebSocket", { status: 426 });
     }
     const url = new URL(request.url);
+    this.directoryRoomId = url.searchParams.get("room")?.trim().toUpperCase() || null;
+    const directoryMaxPlayers = Number(request.headers.get("x-room-max-players"));
+    if (Number.isInteger(directoryMaxPlayers) && directoryMaxPlayers >= 2 && directoryMaxPlayers <= 12) {
+      this.state.maxPlayers = directoryMaxPlayers;
+    }
     const userId = url.searchParams.get("userId") || crypto.randomUUID();
     const username = url.searchParams.get("username") || "Anonymous";
     const connectionId = crypto.randomUUID();
@@ -925,6 +973,7 @@ export class GameRoomDurableObject implements DurableObject {
           for (const ws of this.allSockets()) { try { ws.close(4001, "room_closed"); } catch { /* ignore */ } }
           this.resetRoom();
           this.state.closed = true;
+          this.notifyDirectory(true);
         }
         break;
     }
@@ -946,6 +995,7 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   private roomId(): string {
+    if (this.directoryRoomId) return this.directoryRoomId;
     // Best-effort room label for logs (derived from the DO id name).
     try {
       return this.ctx.id.toString();
@@ -1046,6 +1096,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.countdownEndsAt = null;
     this.state.matchStartTime = Date.now();
     this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
+    this.notifyDirectory();
     this.startSyncLoop();
   }
 
@@ -1106,6 +1157,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.grantMatchRewards(winner);
     logEvent("match_end", { roomId: this.roomId(), winner, reason, isSolo: this.state.isSoloMode });
     this.broadcast({ type: "GAME_OVER", payload: { winner, reason, state: this.serializeState() } });
+    this.notifyDirectory();
     if (this.autoResetTimeout) clearTimeout(this.autoResetTimeout);
     this.autoResetTimeout = setTimeout(() => {
       this.autoResetTimeout = null;
@@ -1126,7 +1178,10 @@ export class GameRoomDurableObject implements DurableObject {
       else if (p.isAlive) { coins += 15; xp += 20; stat.survivals = 1; }
       if (isWinner) { coins += 25; xp += 30; badges += 1; stat.wins = 1; }
       else stat.losses = 1;
-      if (this.state.isSoloMode) { coins = Math.floor(coins * 0.5); xp = Math.floor(xp * 0.5); badges = 0; }
+      if (this.state.isSoloMode) {
+        const soloScale = 0.5 * DIFFICULTY_TUNING[this.state.soloDifficulty].rewardMultiplier;
+        coins = Math.floor(coins * soloScale); xp = Math.floor(xp * soloScale); badges = 0;
+      }
       this.rewardProfile(p.id, p.username, { coins, xp, badges, stat, source: "match_reward" });
     }
   }
@@ -1277,6 +1332,32 @@ export class GameRoomDurableObject implements DurableObject {
   broadcastState() {
     this.persistState();
     this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() });
+    this.notifyDirectory();
+  }
+
+  private notifyDirectory(closed = false): void {
+    const namespace = this.env.ROOM_DIRECTORY;
+    const roomId = this.directoryRoomId;
+    if (!namespace || !roomId || roomId.startsWith("SOLO:")) return;
+    const playerCount = this.state.players.filter((player) => !player.isBot).length;
+    const snapshot = `${roomId}:${playerCount}:${this.state.phase}:${closed}`;
+    if (snapshot === this.lastDirectorySnapshot) return;
+    this.lastDirectorySnapshot = snapshot;
+    try {
+      const id = namespace.idFromName("global-room-directory");
+      const stub = namespace.get(id);
+      void stub.fetch("https://directory/internal/status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId, playerCount, phase: this.state.phase, closed }),
+      }).catch((error) => {
+        this.lastDirectorySnapshot = "";
+        logEvent("room_directory_sync_failed", { roomId, detail: error instanceof Error ? error.message : "unknown" });
+      });
+    } catch (error) {
+      this.lastDirectorySnapshot = "";
+      logEvent("room_directory_sync_failed", { roomId, detail: error instanceof Error ? error.message : "unknown" });
+    }
   }
 
   private persistState(): void {
@@ -1330,8 +1411,11 @@ export class GameRoomDurableObject implements DurableObject {
     human.isAlive = true; human.isReady = false; human.extraLifeUsed = false;
     this.state.players.forEach((player, index) => { const spawn = safeMatchSpawn(index); player.x = spawn.x; player.y = spawn.y; });
     const animalCount = this.state.players.filter((p) => !p.isHunter).length;
-    this.state.ammo = animalCount * 10; this.state.maxAmmo = animalCount * 10;
-    this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length), animalsForLevel(this.state.levelId));
+    const tuning = DIFFICULTY_TUNING[difficulty];
+    const ammoPerAnimal = finalRole === "hunter" ? tuning.humanHunterAmmo : tuning.aiHunterAmmo;
+    this.state.ammo = animalCount * ammoPerAnimal; this.state.maxAmmo = this.state.ammo;
+    const densityScale = finalRole === "hunter" ? (difficulty === "hard" ? 1.35 : difficulty === "easy" ? 0.72 : 1) : 1;
+    this.state.npcSeeds = generateNpcSeeds(Math.round(npcCountForPlayers(this.state.players.length) * densityScale), animalsForLevel(this.state.levelId));
     this.state.winner = null; this.state.isSoloMode = true; this.rewardsGranted = false; this.hunterTagCount = 0;
     this.state.eventLog = [finalRole === "hunter" ? `Solo practice: You are the Hunter. Find the ${animalCount} AI animals!` : `Solo practice: You are an Animal. Survive the AI Hunter!`];
     logEvent("solo_start", { roomId: this.roomId(), role: finalRole, botCount: this.state.players.length - 1 });
@@ -1350,14 +1434,20 @@ export class GameRoomDurableObject implements DurableObject {
     const dt = Math.min((nowMs - lastUpdate) / 1000, 0.1);
     bot.botLastUpdate = nowMs;
 
+    const tuning = DIFFICULTY_TUNING[this.state.soloDifficulty];
     const lastDecision = bot.botLastDecision ?? 0;
-    if (nowMs - lastDecision > 900 + Math.random() * 2300) {
+    if (nowMs - lastDecision > tuning.animalDecisionMs + Math.random() * tuning.animalDecisionJitterMs) {
       bot.botLastDecision = nowMs;
-      const angle = Math.random() * Math.PI * 2;
-      const speed = (3.0 + Math.random() * 0.6) * difficultyMultiplier(this.state.soloDifficulty);
+      const hunter = this.state.players.find((player) => player.isHunter && player.isAlive);
+      const threatDistance = hunter ? Math.hypot(bot.x - hunter.x, bot.y - hunter.y) : Infinity;
+      const evasive = !!hunter && threatDistance < (this.state.soloDifficulty === "hard" ? 820 : this.state.soloDifficulty === "normal" ? 620 : 420);
+      const away = hunter ? Math.atan2(bot.y - hunter.y, bot.x - hunter.x) : 0;
+      const angle = evasive ? away + (Math.random() - 0.5) * (this.state.soloDifficulty === "hard" ? 0.45 : 1.15) : Math.random() * Math.PI * 2;
+      const speed = (205 + Math.random() * 55) * tuning.movement;
       bot.botVx = Math.cos(angle) * speed;
       bot.botVy = Math.sin(angle) * speed;
-      if (Math.random() < 0.10) { bot.botVx = 0; bot.botVy = 0; }
+      const pauseChance = this.state.soloDifficulty === "easy" ? 0.22 : this.state.soloDifficulty === "hard" ? 0.025 : 0.09;
+      if (!evasive && Math.random() < pauseChance) { bot.botVx = 0; bot.botVy = 0; }
     }
     const vx = bot.botVx ?? 0;
     const vy = bot.botVy ?? 0;
@@ -1376,16 +1466,16 @@ export class GameRoomDurableObject implements DurableObject {
     let nearest = targets[0]; let nearestDist = Infinity;
     for (const t of targets) { const d = Math.hypot(t.x - bot.x, t.y - bot.y); if (d < nearestDist) { nearestDist = d; nearest = t; } }
     const lastDecision = bot.botLastDecision ?? 0;
-    if (nowMs - lastDecision > 3000 + Math.random() * 2000) {
-      bot.botLastDecision = nowMs; bot.botPatrolling = Math.random() < 0.55;
+    const tuning = DIFFICULTY_TUNING[this.state.soloDifficulty];
+    if (nowMs - lastDecision > tuning.animalDecisionMs * 1.6 + Math.random() * tuning.animalDecisionJitterMs) {
+      bot.botLastDecision = nowMs; bot.botPatrolling = Math.random() < tuning.patrolChance;
       if (bot.botPatrolling) {
         const angle = Math.random() * Math.PI * 2; const range = 300 + Math.random() * 500;
         bot.botPatrolX = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.cos(angle) * range));
         bot.botPatrolY = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.sin(angle) * range));
       }
     }
-    const difficulty = difficultyMultiplier(this.state.soloDifficulty);
-    const PATROL_SPEED = 180 * difficulty; const CHASE_SPEED = 240 * difficulty;
+    const PATROL_SPEED = tuning.patrolSpeed; const CHASE_SPEED = tuning.chaseSpeed;
     let moveX: number, moveY: number, moveDist: number, speed: number;
     if (bot.botPatrolling) {
       const px = bot.botPatrolX ?? WORLD_SIZE / 2; const py = bot.botPatrolY ?? WORLD_SIZE / 2;
@@ -1395,13 +1485,14 @@ export class GameRoomDurableObject implements DurableObject {
       bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (moveX / moveDist) * speed * dt));
       bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed * dt));
     }
-    const SHOOT_RANGE = 260; const lastShot = bot.botLastShot ?? 0;
-    const shotCooldown = this.state.soloDifficulty === "easy" ? 4_500 : this.state.soloDifficulty === "hard" ? 1_900 : 3_000;
-    if (!bot.botPatrolling && nearestDist < SHOOT_RANGE && this.state.ammo > 0 && nowMs - lastShot > shotCooldown) {
+    const lastShot = bot.botLastShot ?? 0;
+    if (!bot.botPatrolling && nearestDist < tuning.shootRange && this.state.ammo > 0 && nowMs - lastShot > tuning.shotCooldownMs) {
       bot.botLastShot = nowMs;
-      const spread = this.state.soloDifficulty === "easy" ? 240 : this.state.soloDifficulty === "hard" ? 90 : 160;
-      const errorX = (Math.random() - 0.5) * spread; const errorY = (Math.random() - 0.5) * spread;
-      this.handleBotShoot(nearest.x + errorX, nearest.y + errorY);
+      const leadSeconds = this.state.soloDifficulty === "hard" ? 0.28 : this.state.soloDifficulty === "normal" ? 0.12 : 0;
+      const predictedX = nearest.x + (nearest.botVx ?? 0) * leadSeconds;
+      const predictedY = nearest.y + (nearest.botVy ?? 0) * leadSeconds;
+      const errorX = (Math.random() - 0.5) * tuning.shotSpread; const errorY = (Math.random() - 0.5) * tuning.shotSpread;
+      this.handleBotShoot(predictedX + errorX, predictedY + errorY);
     }
   }
   handleBotShoot(targetX: number, targetY: number) {
@@ -1441,6 +1532,7 @@ interface OWPlayer {
   selectedCosmetic: string | null;
   level: number;
   connId: string;
+  lastSyncAt: number;
   lastCollectAt: Record<string, number>; // nodeId -> timestamp (recently collected)
 }
 
@@ -1449,6 +1541,7 @@ interface OWState {
   collectibles: CollectibleNode[];
   dailySeed: string;
   lastResetDate: string;
+  layoutVersion?: number;
   activeWorldEvent: WorldEvent | null;
 }
 
@@ -1461,6 +1554,7 @@ export class OpenWorldZoneDurableObject implements DurableObject {
   constructor(public ctx: DurableObjectState, public env: Env) {
     this.state = {
       players: [], collectibles: [], dailySeed: "", lastResetDate: "",
+      layoutVersion: OW_LAYOUT_VERSION,
       activeWorldEvent: null,
     };
     const concurrencyGuard = (ctx as DurableObjectState & { blockConcurrencyWhile?: (callback: () => Promise<void>) => Promise<void> }).blockConcurrencyWhile;
@@ -1478,10 +1572,11 @@ export class OpenWorldZoneDurableObject implements DurableObject {
 
   private async ensureDaily(): Promise<void> {
     const today = this.todaySeed();
-    if (this.state.dailySeed === today && this.state.collectibles.length > 0) return;
+    if (this.state.dailySeed === today && this.state.collectibles.length > 0 && this.state.layoutVersion === OW_LAYOUT_VERSION) return;
     this.state.dailySeed = today;
     this.state.collectibles = generateCollectibles("savannahReserve", today);
     this.state.lastResetDate = today;
+    this.state.layoutVersion = OW_LAYOUT_VERSION;
     await this.ctx.storage.put("ow", this.state);
   }
 
@@ -1504,17 +1599,27 @@ export class OpenWorldZoneDurableObject implements DurableObject {
     server.addEventListener("close", (event) => this.webSocketClose(server, event.code, event.reason, event.wasClean));
     server.addEventListener("error", (event) => this.webSocketError(server, event));
 
+    const profile = await this.getProfile(userId, username);
     const existing = this.state.players.find((p) => p.id === userId);
-    if (existing) { existing.connId = connectionId; }
+    if (existing) { existing.connId = connectionId; existing.lastSyncAt = Date.now(); }
     else {
+      const returning = profile?.openWorld.lastZoneId === zoneId;
       this.state.players.push({
-        id: userId, username, x: 1500, y: 1500,
-        animalType: defaultAnimalForLevel("savannah"), selectedCosmetic: null, level: 1,
-        connId: connectionId, lastCollectAt: {},
+        id: userId,
+        username,
+        x: returning ? clampOW(profile.openWorld.lastX) : 3_000,
+        y: returning ? clampOW(profile.openWorld.lastY) : 3_000,
+        animalType: defaultAnimalForLevel("savannah"),
+        selectedCosmetic: profile?.selectedCosmetic ?? null,
+        level: profile?.level ?? 1,
+        connId: connectionId,
+        lastSyncAt: Date.now(),
+        lastCollectAt: {},
       });
     }
     await this.ctx.storage.put("ow", this.state);
     this.startBroadcast();
+    if (profile) this.sendProfileSync(userId, profile);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -1529,20 +1634,36 @@ export class OpenWorldZoneDurableObject implements DurableObject {
     switch (parsed.type) {
       case "OPEN_WORLD_JOIN": {
         if (parsed.payload?.animalType) player.animalType = parsed.payload.animalType;
-        if (typeof parsed.payload?.x === "number") player.x = parsed.payload.x;
-        if (typeof parsed.payload?.y === "number") player.y = parsed.payload.y;
+        // A reconnect may correct a small prediction gap, but cannot use JOIN
+        // as an unrestricted teleport across the authoritative world.
+        const requestedX = typeof parsed.payload?.x === "number" ? clampOW(parsed.payload.x) : player.x;
+        const requestedY = typeof parsed.payload?.y === "number" ? clampOW(parsed.payload.y) : player.y;
+        if (Math.hypot(requestedX - player.x, requestedY - player.y) <= 360) {
+          player.x = requestedX;
+          player.y = requestedY;
+        }
+        player.lastSyncAt = Date.now();
         this.broadcastState();
         void this.syncProfileMeta(player, { discoveredZones: ["savannahReserve"], lastZoneId: "savannahReserve", lastX: player.x, lastY: player.y });
         break;
       }
       case "OPEN_WORLD_SYNC": {
-        if (typeof parsed.payload?.x === "number") player.x = clampOW(parsed.payload.x);
-        if (typeof parsed.payload?.y === "number") player.y = clampOW(parsed.payload.y);
+        const now = Date.now();
+        const elapsedMs = Math.max(16, Math.min(250, now - player.lastSyncAt));
+        const next = boundedOpenWorldPosition(
+          { x: player.x, y: player.y },
+          { x: parsed.payload?.x, y: parsed.payload?.y },
+          elapsedMs,
+        );
+        player.x = next.x;
+        player.y = next.y;
+        player.lastSyncAt = now;
         if (parsed.payload?.animalType) player.animalType = parsed.payload.animalType;
         void this.ctx.storage.put("ow", this.state);
         break;
       }
       case "OPEN_WORLD_LEAVE": {
+        void this.syncProfileMeta(player, { discoveredZones: ["savannahReserve"], lastZoneId: "savannahReserve", lastX: player.x, lastY: player.y });
         this.state.players = this.state.players.filter((p) => p.id !== att.userId);
         void this.ctx.storage.put("ow", this.state);
         this.broadcastState();
@@ -1594,6 +1715,7 @@ export class OpenWorldZoneDurableObject implements DurableObject {
     this.sockets.delete(ws);
     const player = this.state.players.find((p) => p.id === att.userId);
     if (player && player.connId === att.connectionId) {
+      void this.syncProfileMeta(player, { discoveredZones: ["savannahReserve"], lastZoneId: "savannahReserve", lastX: player.x, lastY: player.y });
       this.state.players = this.state.players.filter((p) => p.id !== att.userId);
     }
     this.broadcastState();
@@ -1759,6 +1881,22 @@ function clampOW(v: number): number {
   return Math.max(40, Math.min(OW_WORLD_SIZE - 40, v));
 }
 
+export function boundedOpenWorldPosition(
+  current: { x: number; y: number },
+  requested: { x?: number; y?: number },
+  elapsedMs: number,
+): { x: number; y: number } {
+  const requestedX = typeof requested.x === "number" && Number.isFinite(requested.x) ? clampOW(requested.x) : current.x;
+  const requestedY = typeof requested.y === "number" && Number.isFinite(requested.y) ? clampOW(requested.y) : current.y;
+  const dx = requestedX - current.x;
+  const dy = requestedY - current.y;
+  const distance = Math.hypot(dx, dy);
+  const allowed = 36 + 460 * Math.max(16, Math.min(250, elapsedMs)) / 1_000;
+  if (distance <= allowed || distance === 0) return { x: requestedX, y: requestedY };
+  const ratio = allowed / distance;
+  return { x: clampOW(current.x + dx * ratio), y: clampOW(current.y + dy * ratio) };
+}
+
 // ── Router ───────────────────────────────────────────────────────────────────
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -1766,6 +1904,36 @@ export default {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/rooms" || url.pathname.startsWith("/api/rooms/")) {
+      const id = env.ROOM_DIRECTORY.idFromName("global-room-directory");
+      return env.ROOM_DIRECTORY.get(id).fetch(request);
+    }
+
+    if (url.pathname.startsWith("/api/soccer/")) {
+      const match = url.pathname.match(/^\/api\/soccer\/([^/]+)\/websocket$/);
+      const roomId = match ? decodeURIComponent(match[1]).trim().toUpperCase() : "";
+      if (!roomId) return new Response(JSON.stringify({ error: "room_required" }), { status: 400, headers: JSON_HEADERS });
+      const directoryId = env.ROOM_DIRECTORY.idFromName("global-room-directory");
+      const directory = env.ROOM_DIRECTORY.get(directoryId);
+      let authorized = false;
+      try {
+        const authorization = await directory.fetch("https://directory/authorize", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ roomId, accessToken: url.searchParams.get("roomAccess") || undefined, activity: "soccer" }),
+        });
+        const result = await authorization.json() as { authorized?: boolean; activity?: string };
+        authorized = result.authorized === true && (result.activity === undefined || result.activity === null || result.activity === "soccer");
+      } catch {
+        return new Response(JSON.stringify({ error: "room_directory_unavailable" }), { status: 503, headers: JSON_HEADERS });
+      }
+      if (!authorized) return new Response(JSON.stringify({ error: "soccer_room_access_required" }), { status: 403, headers: JSON_HEADERS });
+      const upstreamUrl = new URL(request.url);
+      upstreamUrl.searchParams.set("room", roomId);
+      const id = env.SOCCER_ROOM.idFromName(`soccer:${roomId}`);
+      return env.SOCCER_ROOM.get(id).fetch(new Request(upstreamUrl.toString(), request));
     }
 
     if (url.pathname.startsWith("/api/profile")) {
@@ -1790,8 +1958,40 @@ export default {
       logEvent("protocol_rejection", { reason: "room_required" });
       return new Response(JSON.stringify({ error: "room_required", detail: "Connect with an explicit ?room=<ROOM_ID> parameter." }), { status: 400, headers: JSON_HEADERS });
     }
+    const directoryId = env.ROOM_DIRECTORY.idFromName("global-room-directory");
+    const directory = env.ROOM_DIRECTORY.get(directoryId);
+    let authorized = false;
+    let directoryMaxPlayers: number | null = null;
+    try {
+      const authorization = await directory.fetch("https://directory/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          roomId,
+          accessToken: url.searchParams.get("roomAccess") || undefined,
+          activity: "hunt",
+        }),
+      });
+      const result = await authorization.json() as { authorized?: boolean; maxPlayers?: number };
+      authorized = result.authorized === true;
+      if (Number.isInteger(result.maxPlayers) && Number(result.maxPlayers) >= 2 && Number(result.maxPlayers) <= 12) {
+        directoryMaxPlayers = Number(result.maxPlayers);
+      }
+    } catch (error) {
+      logEvent("room_authorization_failed", { roomId, detail: error instanceof Error ? error.message : "unknown" });
+      return new Response(JSON.stringify({ error: "room_directory_unavailable" }), { status: 503, headers: JSON_HEADERS });
+    }
+    if (!authorized) {
+      logEvent("room_access_rejected", { roomId });
+      return new Response(JSON.stringify({ error: "private_room_access_required" }), { status: 403, headers: JSON_HEADERS });
+    }
     const id = env.GAME_ROOM.idFromName(roomId);
     const stub = env.GAME_ROOM.get(id);
+    if (directoryMaxPlayers !== null) {
+      const headers = new Headers(request.headers);
+      headers.set("x-room-max-players", String(directoryMaxPlayers));
+      return stub.fetch(new Request(request, { headers }));
+    }
     return stub.fetch(request);
   },
 };

@@ -5,7 +5,8 @@ test("lobby Admin button opens the server-authorized control panel", async ({ pa
   await page.getByLabel(/Player name/i).fill(`Admin-${Date.now()}`);
   await page.getByRole("button", { name: /^PLAY$/i }).click();
   await page.getByRole("button", { name: /Multiplayer/i }).click();
-  await page.getByRole("button", { name: /Create a Room/i }).click();
+  await page.getByRole("textbox", { name: /^Room name$/i }).fill(`Admin Camp ${Date.now()}`);
+  await page.getByRole("button", { name: /^Create room$/i }).click();
   await expect(page.getByRole("button", { name: /^Admin$/i })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: /^Admin$/i }).click();
   await expect(page.getByRole("heading", { name: /Admin Access/i })).toBeVisible();

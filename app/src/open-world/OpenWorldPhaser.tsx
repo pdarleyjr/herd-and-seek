@@ -4,6 +4,7 @@ import { OpenWorldBridge } from "../game-engine/OpenWorldBridge";
 import { OpenWorldScene } from "../game-engine/scenes/OpenWorldScene";
 import type { ContextAction } from "./openWorldControls";
 import type { OpenWorldProfile, OpenWorldZoneState, QuestId, QuestProgress } from "./openWorldTypes";
+import { gameAudio } from "../game-engine/systems/AudioSystem";
 
 interface OpenWorldPhaserProps {
   userId: string;
@@ -46,7 +47,22 @@ export default function OpenWorldPhaser(props: OpenWorldPhaserProps) {
   }, [bridge]);
 
   useEffect(() => bridge.onPrompt(setPrompt), [bridge]);
-  useEffect(() => bridge.onReady((key) => { if (shellRef.current) shellRef.current.dataset.engineReady = key; }), [bridge]);
+  useEffect(() => {
+    let detachAudio = () => {};
+    const unsubscribe = bridge.onReady((key) => {
+      if (shellRef.current) shellRef.current.dataset.engineReady = key;
+      detachAudio();
+      const scene = gameRef.current?.scene.getScene(key);
+      if (!scene) return;
+      const onCue = (cue: { kind: string; intensity: number }) => {
+        const surface = cue.kind === "water-splash" ? "water" : cue.kind === "footstep-rock" ? "rock" : cue.kind === "footstep-dirt" ? "sand" : cue.kind === "npc-rustle" ? "forest" : "grass";
+        gameAudio.footstep(surface, cue.intensity);
+      };
+      scene.events.on("environment-audio-cue", onCue);
+      detachAudio = () => scene.events.off("environment-audio-cue", onCue);
+    });
+    return () => { detachAudio(); unsubscribe(); };
+  }, [bridge]);
   useEffect(() => bridge.onPosition(({ x, y }) => {
     if (!shellRef.current) return;
     shellRef.current.dataset.localX = x.toFixed(2);
@@ -76,7 +92,7 @@ export default function OpenWorldPhaser(props: OpenWorldPhaserProps) {
       data-active-quests={Object.values(props.questProgress).filter((quest) => quest.status === "active").length}
       data-complete-quests={Object.values(props.questProgress).filter((quest) => quest.status === "complete").length}
       data-claimed-quests={Object.values(props.questProgress).filter((quest) => quest.status === "claimed").length}>
-      <div ref={hostRef} className="open-world-phaser__host" aria-label="Savannah Reserve game world" />
+      <div ref={hostRef} className="open-world-phaser__host" aria-label="Grand Reserve seamless open world" />
       <div className="open-world-phaser__joystick" aria-label="Movement joystick"
         onPointerDown={(event) => { joystickOrigin.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); moveJoystick(event.clientX, event.clientY); }}
         onPointerMove={(event) => moveJoystick(event.clientX, event.clientY)}

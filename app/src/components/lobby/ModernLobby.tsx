@@ -4,6 +4,7 @@ import { LEVELS, LEVEL_ORDER, ANIMAL_DEFS, PERK_OPTIONS, animalsForLevel } from 
 import type { ConnectionStatus } from "../../types";
 import "./modernLobby.css";
 import "./modernLobbyOverrides.css";
+import AudioControls from "../AudioControls";
 
 const PhaserGame = lazy(() => import("../../game-engine/PhaserGame"));
 
@@ -66,7 +67,8 @@ export default function ModernLobby(props: ModernLobbyProps) {
           <span className="lobby-brand__mark" aria-hidden="true"><i /><i /></span>
           <div><strong>Herd &amp; Seek</strong><small>Field Camp</small></div>
         </div>
-        <span className="lobby-mode">Private expedition</span>
+        <span className="lobby-mode">Multiplayer expedition</span>
+        <AudioControls compact className="lobby-audio-controls" />
         <button className="lobby-quiet-button lobby-admin-button" type="button" onClick={onOpenAdmin}>Admin</button>
         <button className="room-ticket" type="button" onClick={copyRoom} aria-label={`Copy room code ${roomCode}`}>
           <small>Room code</small><strong>{roomCode}</strong><span>{copied ? "Copied" : "Copy"}</span>

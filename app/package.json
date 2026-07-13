@@ -16,8 +16,9 @@
     "test:all": "npm run lint && npm test && npm run build && npm run e2e",
     "preview": "vite preview",
     "assets:build": "node scripts/build-asset-atlas.mjs",
+    "assets:audio": "node scripts/generate-audio-assets.mjs",
     "assets:check": "node scripts/build-asset-atlas.mjs --check",
-    "prebuild": "npm run assets:build"
+    "prebuild": "npm run assets:audio && npm run assets:build"
   },
   "dependencies": {
     "partysocket": "^1.2.0",

@@ -12,7 +12,8 @@ async function enterLobby(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await authenticate(page, `Trail-${Date.now()}`);
   await page.getByRole("button", { name: /Multiplayer/i }).click();
-  await page.getByRole("button", { name: /Create a Room/i }).click();
+  await page.getByRole("textbox", { name: /^Room name$/i }).fill(`Visual Camp ${Date.now()}`);
+  await page.getByRole("button", { name: /^Create room$/i }).click();
   await expect(page.getByRole("button", { name: /Copy room code/i })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-scene="preview"] canvas')).toHaveCount(1, { timeout: 15_000 });
   await expect(page.locator('[data-scene="preview"]')).toHaveAttribute("data-engine-ready", "LobbyPreviewScene", { timeout: 15_000 });

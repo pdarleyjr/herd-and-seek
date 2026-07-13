@@ -35,6 +35,7 @@ vi.mock("./SoundManager", () => ({
     miss: vi.fn(),
     gameEnd: vi.fn(),
     gameStart: vi.fn(),
+    startMusic: vi.fn(),
   },
 }));
 

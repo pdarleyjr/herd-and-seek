@@ -8,6 +8,9 @@ const PALETTES: Record<LevelId, { ground: number; tile: number; accent: number; 
   savannah: { ground: 0x9e713d, tile: 0xbc8b46, accent: 0xd6b65e, path: 0x77513a, water: 0x4d8990 },
 };
 
+const MAP_SCALE = WORLD_SIZE / 2_000;
+const sx = (value: number): number => Math.round(value * MAP_SCALE);
+
 export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.Physics.Arcade.StaticGroup {
   const palette = PALETTES[levelId];
   const tileKey = `ground-${levelId}`;
@@ -22,22 +25,22 @@ export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.P
   scene.add.tileSprite(WORLD_SIZE / 2, WORLD_SIZE / 2, WORLD_SIZE, WORLD_SIZE, tileKey).setDepth(-30);
 
   const terrain = scene.add.graphics().setDepth(-22);
-  terrain.lineStyle(levelId === "deepDark" ? 125 : 150, palette.path, 0.84);
-  terrain.lineBetween(-80, 1540, 520, 1040).lineBetween(520, 1040, 1050, 900).lineBetween(1050, 900, 1540, 650).lineBetween(1540, 650, 2080, 240);
-  terrain.fillStyle(palette.water, 0.96).fillEllipse(520, 540, 460, 300);
-  terrain.lineStyle(18, levelId === "deepDark" ? 0x3bd1c5 : 0x91c69a, 0.3).strokeEllipse(520, 540, 480, 320);
+  terrain.lineStyle(sx(levelId === "deepDark" ? 125 : 150), palette.path, 0.84);
+  terrain.lineBetween(sx(-80), sx(1540), sx(520), sx(1040)).lineBetween(sx(520), sx(1040), sx(1050), sx(900)).lineBetween(sx(1050), sx(900), sx(1540), sx(650)).lineBetween(sx(1540), sx(650), sx(2080), sx(240));
+  terrain.fillStyle(palette.water, 0.96).fillEllipse(sx(520), sx(540), sx(460), sx(300));
+  terrain.lineStyle(sx(18), levelId === "deepDark" ? 0x3bd1c5 : 0x91c69a, 0.3).strokeEllipse(sx(520), sx(540), sx(480), sx(320));
   if (levelId === "deepDark") addUnderwaterBackdrop(scene);
   if (levelId === "savannah") addSavannahBackdrop(scene);
 
   const colliders = scene.physics.add.staticGroup();
   const random = new Phaser.Math.RandomDataGenerator([`herd-seek-${levelId}`]);
   const acceptedTrees: Array<{ x: number; y: number }> = [];
-  for (let index = 0; index < 44 && acceptedTrees.length < 28; index += 1) {
+  for (let index = 0; index < 96 && acceptedTrees.length < 54; index += 1) {
     const x = random.between(70, WORLD_SIZE - 70);
     const y = random.between(70, WORLD_SIZE - 70);
-    if (Phaser.Math.Distance.Between(x, y, 520, 540) < 280) continue;
-    if (x < 420 && y < 420) continue;
-    if (acceptedTrees.some((tree) => Phaser.Math.Distance.Between(x, y, tree.x, tree.y) < 180)) continue;
+    if (Phaser.Math.Distance.Between(x, y, sx(520), sx(540)) < sx(280)) continue;
+    if (x < sx(420) && y < sx(420)) continue;
+    if (acceptedTrees.some((tree) => Phaser.Math.Distance.Between(x, y, tree.x, tree.y) < sx(150))) continue;
     acceptedTrees.push({ x, y });
     if (levelId === "forest" && scene.textures.exists(index % 3 ? "tree-round" : "tree-pine")) {
       const tree = colliders.create(x, y, index % 3 ? "tree-round" : "tree-pine") as Phaser.Physics.Arcade.Image;
@@ -47,11 +50,11 @@ export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.P
     else addSavannahProp(scene, x, y, index, random);
   }
 
-  for (let index = 0; index < 110; index += 1) {
+  for (let index = 0; index < 210; index += 1) {
     const x = random.between(24, WORLD_SIZE - 24);
     const y = random.between(24, WORLD_SIZE - 24);
     const tuft = scene.add.star(x, y, 4, 3, random.between(8, 15), palette.accent, random.realInRange(0.18, 0.48)).setRotation(random.realInRange(-0.4, 0.4)).setDepth(y - 4);
-    scene.tweens.add({ targets: tuft, angle: random.between(-5, 5), duration: random.between(1400, 2600), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    if (index % 4 === 0) scene.tweens.add({ targets: tuft, angle: random.between(-5, 5), duration: random.between(1400, 2600), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
   }
 
   return colliders;
@@ -70,7 +73,7 @@ function addUnderwaterBackdrop(scene: Phaser.Scene): void {
     const bubble = scene.add.circle(x, y, 3 + index % 5, 0xb9f4ef, 0.34).setStrokeStyle(1, 0xe4ffff, 0.45).setDepth(y + 2);
     scene.tweens.add({ targets: bubble, y: y - 180 - index % 4 * 45, x: x + (index % 2 ? 16 : -16), alpha: 0, duration: 3000 + index * 85, repeat: -1, delay: index * 90 });
   }
-  const wreck = scene.add.container(1430, 1320).setDepth(1320);
+  const wreck = scene.add.container(sx(1430), sx(1320)).setDepth(sx(1320));
   const hull = scene.add.rectangle(0, 0, 250, 72, 0x594c3d).setRotation(-0.12).setStrokeStyle(7, 0x2d3634);
   const mast = scene.add.rectangle(18, -94, 13, 178, 0x574535).setRotation(0.08);
   const sail = scene.add.triangle(74, -105, 0, 0, 0, 115, 115, 82, 0x62818b, 0.42).setRotation(0.08);
@@ -98,11 +101,13 @@ function addUnderwaterProp(scene: Phaser.Scene, x: number, y: number, index: num
 }
 
 function addSavannahBackdrop(scene: Phaser.Scene): void {
-  const sun = scene.add.circle(1720, 180, 82, 0xffb84e, 0.3).setDepth(-27).setBlendMode(Phaser.BlendModes.ADD);
+  const sun = scene.add.circle(sx(1720), sx(180), sx(82), 0xffb84e, 0.3).setDepth(-27).setBlendMode(Phaser.BlendModes.ADD);
   scene.tweens.add({ targets: sun, scale: 1.18, alpha: 0.16, duration: 2400, yoyo: true, repeat: -1 });
-  const grassland = scene.add.ellipse(1320, 1320, 900, 620, 0xd8b452, 0.18).setDepth(-26);
+  const grassland = scene.add.ellipse(sx(1320), sx(1320), sx(900), sx(620), 0xd8b452, 0.18).setDepth(-26);
   scene.tweens.add({ targets: grassland, alpha: { from: 0.1, to: 0.24 }, duration: 3600, yoyo: true, repeat: -1 });
-  for (const [x, y] of [[330, 1280], [1120, 1480], [1680, 1050]] as Array<[number, number]>) {
+  for (const [baseX, baseY] of [[330, 1280], [1120, 1480], [1680, 1050], [1_950, 1_620]] as Array<[number, number]>) {
+    const x = sx(baseX);
+    const y = sx(baseY);
     const mound = scene.add.ellipse(x, y, 70, 92, 0x7b5434).setStrokeStyle(5, 0x563725).setDepth(y);
     scene.add.circle(x - 8, y - 20, 7, 0x3a281d).setDepth(y + 1);
     mound.setRotation((x % 5 - 2) * 0.03);

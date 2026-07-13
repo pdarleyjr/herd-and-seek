@@ -12,12 +12,16 @@ import { buildBiomeWorld } from "../maps/worldBuilder";
 import { ensureAnimalTexture, hunterTextureFor } from "../systems/AssetRegistry";
 import { configureGameCamera } from "../systems/CameraController";
 import { CombatFxSystem } from "../systems/CombatFxSystem";
+import { EnvironmentalAudioCueSystem } from "../systems/EnvironmentalAudioCueSystem";
 import { InputManager } from "../systems/InputManager";
+import { LocomotionAnimationSystem, prefersReducedMotion, type LocomotionRole } from "../systems/LocomotionAnimationSystem";
 import { PerformanceMonitor } from "../systems/PerformanceMonitor";
 import { createPerkRuntime, getPerkSpec, tryActivatePerk, type PerkRuntime } from "../systems/PerkSystem";
 import { normalizeInput, reconcilePosition } from "../systems/PlayerController";
 import { qualitySettingsFor } from "../systems/QualityManager";
 import { RemotePlayerInterpolator } from "../systems/RemotePlayerInterpolator";
+import { createMatchTerrainSurfaceSystem, type TerrainSample, type TerrainSurfaceSystem } from "../systems/TerrainSurfaceSystem";
+import { WaterRippleSystem } from "../systems/WaterRippleSystem";
 
 interface PlayerVisual {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -32,8 +36,12 @@ export class MatchScene extends Phaser.Scene {
   private readonly npcSprites = new Map<number, Phaser.GameObjects.Sprite>();
   private readonly interpolator = new RemotePlayerInterpolator(100);
   private readonly performanceMonitor = new PerformanceMonitor();
+  private readonly locomotion = new LocomotionAnimationSystem();
+  private readonly npcMotion = new Map<number, { x: number; y: number; time: number }>();
   private inputManager?: InputManager;
   private combatFx?: CombatFxSystem;
+  private ripples?: WaterRippleSystem;
+  private environmentalCues?: EnvironmentalAudioCueSystem;
   private localPlayer?: PlayerVisual;
   private colliders?: Phaser.Physics.Arcade.StaticGroup;
   private reticle?: Phaser.GameObjects.Arc;
@@ -42,6 +50,8 @@ export class MatchScene extends Phaser.Scene {
   private sequence = 0;
   private perkRuntime: PerkRuntime = createPerkRuntime("none");
   private unsubscribers: Array<() => void> = [];
+  private terrain: TerrainSurfaceSystem = createMatchTerrainSurfaceSystem("forest");
+  private reducedMotion = false;
 
   private readonly bridge: GameBridge;
 
@@ -52,7 +62,17 @@ export class MatchScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD_SIZE, WORLD_SIZE);
     this.inputManager = new InputManager(this);
     this.combatFx = new CombatFxSystem(this);
+    this.reducedMotion = prefersReducedMotion();
     this.renderWorld(this.state?.levelId ?? "forest");
+    this.ripples = new WaterRippleSystem(this, {
+      quality: this.bridge.quality,
+      reducedMotion: this.reducedMotion,
+      onDisplacement: (cue) => this.events.emit("environment-displacement", cue),
+    });
+    this.environmentalCues = new EnvironmentalAudioCueSystem({
+      quality: this.bridge.quality,
+      emit: (cue) => this.events.emit("environment-audio-cue", cue),
+    });
     this.reticle = this.add.circle(0, 0, 18, 0xffffff, 0.04).setStrokeStyle(3, 0xffe78f, 0.9).setDepth(500).setVisible(false);
     this.input.on("pointermove", this.updateReticle, this);
     this.input.on("pointerup", this.fireFromPointer, this);
@@ -63,6 +83,8 @@ export class MatchScene extends Phaser.Scene {
       this.bridge.events.on("QUALITY_CHANGED", ({ tier }) => {
         const settings = qualitySettingsFor(tier);
         this.cameras.main.setRoundPixels(settings.renderScale < 0.8);
+        this.ripples?.configure(tier, this.reducedMotion);
+        this.environmentalCues?.configure(tier);
       }),
       this.bridge.events.on("PERK_ACTIVATE", () => this.activatePerk()),
       this.bridge.events.on("DECOY_SPAWN", (payload) => this.spawnDecoy(payload)),
@@ -81,16 +103,30 @@ export class MatchScene extends Phaser.Scene {
     const now = Date.now();
     const isCamouflaged = this.perkRuntime.perk === "camouflage" && this.perkRuntime.activeUntil > now;
     const input = isCamouflaged || !player.isAlive || state.phase !== "PLAYING" ? { x: 0, y: 0 } : normalizeInput(this.inputManager.movement());
+    const surface = this.terrain.sample(local.sprite.x, local.sprite.y);
     let speed = (player.isHunter ? HUNTER_SPEED : ANIMAL_SPEED) * 72;
     if (player.perk === "speedBoost" && !player.isHunter) speed *= getPerkSpec("speedBoost").speedMultiplier;
     if (this.perkRuntime.perk === "sprint" && this.perkRuntime.activeUntil > now) speed *= getPerkSpec("sprint").speedMultiplier;
-    local.sprite.setVelocity(input.x * speed, input.y * speed);
+    speed *= surface.speedMultiplier;
+    const velocityX = input.x * speed;
+    const velocityY = input.y * speed;
+    local.sprite.setVelocity(velocityX, velocityY);
     if (input.x !== 0) local.sprite.setFlipX(input.x < 0);
     const moving = input.x !== 0 || input.y !== 0;
-    local.sprite.setAngle(moving ? Math.sin(now / 85) * 2.2 : Math.sin(now / 300) * 0.8);
     local.shadow.setPosition(local.sprite.x, local.sprite.y + 34);
-    local.nameplate.setPosition(local.sprite.x, local.sprite.y - 58);
+    const localPose = this.locomotion.update(player.id, local, {
+      elapsedMs: now,
+      velocityX,
+      velocityY,
+      maxSpeed: Math.max(speed, 1),
+      surface,
+      role: player.isHunter ? "hunter" : "animal",
+      reducedMotion: this.reducedMotion,
+    });
+    local.nameplate.setPosition(local.sprite.x, local.sprite.y - 58 - localPose.bobPx * 0.22);
     local.highlight?.setPosition(local.sprite.x, local.sprite.y + 2).setDepth(local.sprite.y - 1);
+    local.sprite.setDepth(local.sprite.y);
+    this.updateEnvironment(player.id, player.isHunter ? "hunter" : "animal", local.sprite.x, local.sprite.y, Math.hypot(velocityX, velocityY), surface, now);
 
     if (this.inputManager.perkJustPressed()) this.bridge.events.emit("PERK_ACTIVATE", { perk: player.perk });
 
@@ -105,16 +141,34 @@ export class MatchScene extends Phaser.Scene {
       const visual = this.visuals.get(remote.id);
       const sample = this.interpolator.sample(remote.id, now);
       if (!visual || !sample) continue;
+      const remoteVelocityX = (sample.x - visual.sprite.x) * 1_000 / Math.max(delta, 1);
+      const remoteVelocityY = (sample.y - visual.sprite.y) * 1_000 / Math.max(delta, 1);
       visual.sprite.setPosition(sample.x, sample.y);
       visual.shadow.setPosition(sample.x, sample.y + 34);
-      visual.nameplate.setPosition(sample.x, sample.y - 58);
+      const remoteSurface = this.terrain.sample(sample.x, sample.y);
+      const remotePose = this.locomotion.update(remote.id, visual, {
+        elapsedMs: now,
+        velocityX: remoteVelocityX,
+        velocityY: remoteVelocityY,
+        maxSpeed: Math.max((remote.isHunter ? HUNTER_SPEED : ANIMAL_SPEED) * 72, 1),
+        surface: remoteSurface,
+        role: remote.isHunter ? "hunter" : "animal",
+        reducedMotion: this.reducedMotion,
+      });
+      visual.sprite.setDepth(sample.y);
+      visual.nameplate.setPosition(sample.x, sample.y - 58 - remotePose.bobPx * 0.22);
+      visual.highlight?.setPosition(sample.x, sample.y + 2).setDepth(sample.y - 1);
+      this.updateEnvironment(remote.id, remote.isHunter ? "hunter" : "animal", sample.x, sample.y, Math.hypot(remoteVelocityX, remoteVelocityY), remoteSurface, now);
     }
+
+    this.updateNpcLocomotion(now, delta);
 
     const fps = this.performanceMonitor.tick(delta);
     if (fps !== null) this.bridge.events.emit("FPS_UPDATE", { fps });
   }
 
   private renderWorld(levelId: SerializedState["levelId"]): void {
+    this.terrain = createMatchTerrainSurfaceSystem(levelId);
     this.children.removeAll(true);
     this.colliders = buildBiomeWorld(this, levelId);
     const biomeName = levelId === "forest" ? "Fernwhistle Forest" : levelId === "deepDark" ? "The Deep Dark" : "Savannah at Dusk";
@@ -130,6 +184,7 @@ export class MatchScene extends Phaser.Scene {
     const activeIds = new Set(state.players.map((player) => player.id));
     for (const [id, visual] of this.visuals) {
       if (activeIds.has(id)) continue;
+      this.locomotion.forget(id); this.ripples?.remove(id); this.environmentalCues?.remove(id);
       visual.sprite.destroy(); visual.nameplate.destroy(); visual.shadow.destroy(); visual.highlight?.destroy();
       this.visuals.delete(id); this.interpolator.remove(id);
     }
@@ -160,6 +215,7 @@ export class MatchScene extends Phaser.Scene {
         this.perkRuntime = createPerkRuntime(player.perk);
       }
     } else if (visual.sprite.texture.key !== key) {
+      this.locomotion.forget(player.id);
       visual.sprite.setTexture(key).setDisplaySize(player.isHunter ? 76 : 86, player.isHunter ? 76 : 86);
     }
     visual.sprite.setDepth(visual.sprite.y).setAlpha(player.isAlive ? 1 : 0.32);
@@ -175,15 +231,56 @@ export class MatchScene extends Phaser.Scene {
 
   private syncNpcs(state: SerializedState): void {
     const ids = new Set(state.npcSeeds.map((npc) => npc.id));
-    for (const [id, sprite] of this.npcSprites) if (!ids.has(id)) { sprite.destroy(); this.npcSprites.delete(id); }
+    for (const [id, sprite] of this.npcSprites) if (!ids.has(id)) {
+      const actorId = `npc:${id}`;
+      this.locomotion.forget(actorId); this.ripples?.remove(actorId); this.environmentalCues?.remove(actorId);
+      sprite.destroy(); this.npcSprites.delete(id); this.npcMotion.delete(id);
+    }
     for (const npc of state.npcSeeds) {
       let sprite = this.npcSprites.get(npc.id);
       if (!sprite) {
         sprite = this.add.sprite(npc.x, npc.y, ensureAnimalTexture(this, npc.animalType)).setDisplaySize(72, 72).setAlpha(0.82).setDepth(npc.y);
         this.npcSprites.set(npc.id, sprite);
-        this.tweens.add({ targets: sprite, y: npc.y - 7, duration: 900 + (npc.id % 5) * 130, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+        this.npcMotion.set(npc.id, { x: sprite.x, y: sprite.y, time: Date.now() });
+        if (!this.reducedMotion) this.tweens.add({
+          targets: sprite,
+          x: npc.x + (npc.id % 2 ? 26 : -26),
+          y: npc.y - 9,
+          duration: 1_200 + (npc.id % 5) * 170,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.easeInOut",
+        });
       }
     }
+  }
+
+  private updateNpcLocomotion(now: number, delta: number): void {
+    for (const [id, sprite] of this.npcSprites) {
+      const previous = this.npcMotion.get(id) ?? { x: sprite.x, y: sprite.y, time: now - delta };
+      const elapsed = Math.max(now - previous.time, delta, 1);
+      const velocityX = (sprite.x - previous.x) * 1_000 / elapsed;
+      const velocityY = (sprite.y - previous.y) * 1_000 / elapsed;
+      const surface = this.terrain.sample(sprite.x, sprite.y);
+      this.locomotion.update(`npc:${id}`, { sprite }, {
+        elapsedMs: now,
+        velocityX,
+        velocityY,
+        maxSpeed: 120,
+        surface,
+        role: "npc",
+        reducedMotion: this.reducedMotion,
+      });
+      if (Math.abs(velocityX) > 0.5) sprite.setFlipX(velocityX < 0);
+      sprite.setDepth(sprite.y);
+      this.updateEnvironment(`npc:${id}`, "npc", sprite.x, sprite.y, Math.hypot(velocityX, velocityY), surface, now);
+      this.npcMotion.set(id, { x: sprite.x, y: sprite.y, time: now });
+    }
+  }
+
+  private updateEnvironment(actorId: string, role: LocomotionRole, x: number, y: number, speed: number, surface: TerrainSample, now: number): void {
+    this.ripples?.update({ actorId, x, y, speed, surface, nowMs: now });
+    this.environmentalCues?.update({ actorId, role, x, y, speed, surface, nowMs: now });
   }
 
   private updateReticle(pointer: Phaser.Input.Pointer): void {
@@ -234,8 +331,12 @@ export class MatchScene extends Phaser.Scene {
     this.input.off("pointermove", this.updateReticle, this);
     this.input.off("pointerup", this.fireFromPointer, this);
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+    this.ripples?.destroy();
+    this.environmentalCues?.clear();
+    this.locomotion.destroy();
     this.interpolator.clear();
     this.visuals.clear();
     this.npcSprites.clear();
+    this.npcMotion.clear();
   }
 }

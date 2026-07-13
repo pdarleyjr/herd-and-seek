@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import { useOpenWorldSocket } from "./useOpenWorldSocket";
 import { QUEST_CATALOG } from "./questCatalog";
+import AudioControls from "../components/AudioControls";
 import "./openWorldPhaser.css";
 
 const OpenWorldPhaser = lazy(() => import("./OpenWorldPhaser"));
@@ -27,7 +28,7 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
   const profileReady = profile && profile.level > 0;
 
   return (
-    <div className="relative w-dvw h-dvh overflow-hidden bg-[#caa869]">
+    <div className="open-world-shell relative w-dvw h-dvh overflow-hidden bg-[#498099]">
       <Suspense fallback={<div className="absolute inset-0 grid place-items-center bg-[#9f793d] text-[#fff2bd] font-bold">Opening the reserve…</div>}>
         <OpenWorldPhaser
           userId={userId}
@@ -52,7 +53,7 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
         <button
           type="button"
           onClick={() => { ow.leave(); onExit(); }}
-          aria-label="Leave the Savannah Reserve"
+          aria-label="Leave the Grand Reserve"
           className="game-button game-button--danger pointer-events-auto shrink-0"
         >
           ← Leave
@@ -62,13 +63,13 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
         <div className="pointer-events-auto flex-1 min-w-0">
           {!ow.connected ? (
             <div className="game-panel inline-flex items-center gap-2 px-3 py-2 pointer-events-auto" role="status" aria-live="polite">
-              <span className="text-[#7fff00] font-bold text-sm">Savannah Reserve</span>
+              <span className="open-world-title font-bold text-sm">Grand Reserve</span>
               <span className="status-pill status-pill--muted">Connecting…</span>
             </div>
           ) : activeQuests.length === 0 ? (
             <div className="game-panel inline-flex items-center gap-2 px-3 py-2 pointer-events-auto">
-              <span className="text-[#7fff00] font-bold text-sm">Savannah Reserve</span>
-              <span className="text-xs text-gray-300">Go to the lodge to accept quests.</span>
+              <span className="open-world-title font-bold text-sm">Grand Reserve</span>
+              <span className="text-xs">Seven seamless districts · {ow.zoneState?.players.length ?? 0} explorers</span>
             </div>
           ) : (
             <div
@@ -98,6 +99,7 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
 
         {/* Right: profile + quest toggle */}
         <div className="pointer-events-auto flex items-center gap-2 shrink-0">
+          <AudioControls compact />
           <div
             className="game-panel flex items-center gap-3 px-3 py-2"
             aria-live="polite"
@@ -106,8 +108,8 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
             {profileReady ? (
               <>
                 <span className="font-bold text-sm">Lv {profile.level}</span>
-                <span className="text-[#ffcf33] text-sm">🪙 {profile.coins}</span>
-                <span className="text-[#ffd84d] text-sm">🏅 {profile.badges}</span>
+                <span className="open-world-stat text-sm"><b>C</b> {profile.coins}</span>
+                <span className="open-world-stat text-sm"><b>B</b> {profile.badges}</span>
               </>
             ) : (
               <span className="status-pill status-pill--muted">
@@ -151,13 +153,13 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
           role="dialog"
           aria-label="All quests"
         >
-          <h3 className="game-panel__title mb-2">All Quests</h3>
+          <h3 className="game-panel__title mb-2">Reserve Quest Board</h3>
           <div className="space-y-2">
             {QUEST_CATALOG.map((q) => {
               const p = questProgress[q.id];
               const status = p?.status ?? "available";
               return (
-                <div key={q.id} className="border border-white/10 rounded-lg p-2">
+                <div key={q.id} className="open-world-quest-card rounded-lg p-2">
                   <div className="flex justify-between">
                     <span className="font-semibold">
                       {q.title} {q.daily && <span className="text-[10px] text-[#ffd84d]">DAILY</span>}

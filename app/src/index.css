@@ -1,4 +1,6 @@
 @import "tailwindcss";
+
+.home-audio-controls{position:absolute;z-index:40;top:max(1rem,env(safe-area-inset-top));right:max(1rem,env(safe-area-inset-right))}
 @import "./ui/ui.css";
 
 /* Safe-area variables for notch / home-indicator aware layouts. */

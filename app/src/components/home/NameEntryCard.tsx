@@ -23,8 +23,8 @@ export default function NameEntryCard({ value, onChange, onSubmit, error }: Name
       <div
         className="w-full rounded-2xl p-1"
         style={{
-          background: "linear-gradient(135deg, #f5c842 0%, #c8860a 40%, #f5c842 70%, #c8860a 100%)",
-          boxShadow: "0 6px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(200,130,10,0.4)",
+          background: "#3b0855",
+          boxShadow: "0 8px 0 #3b0855, 0 16px 30px rgba(59,8,85,0.32)",
         }}
       >
         {/* Inner form row */}
@@ -32,14 +32,14 @@ export default function NameEntryCard({ value, onChange, onSubmit, error }: Name
           onSubmit={handleSubmit}
           className="flex items-stretch overflow-hidden rounded-xl"
           style={{
-            background: "linear-gradient(180deg, #f0e0b0 0%, #e8d098 60%, #d8c080 100%)",
-            boxShadow: "inset 0 2px 6px rgba(0,0,0,0.2)",
+            background: "#fff5de",
+            boxShadow: "inset 0 -5px 0 rgba(73,128,153,0.2)",
           }}
         >
           {/* User icon */}
           <div
             className="flex items-center pl-4 pr-2 text-2xl shrink-0"
-            style={{ color: "#8b5c1e" }}
+            style={{ color: "#852467" }}
             aria-hidden="true"
           >
             <PersonIcon />
@@ -60,9 +60,9 @@ export default function NameEntryCard({ value, onChange, onSubmit, error }: Name
               maxLength={24}
               autoComplete="nickname"
               autoFocus
-              className="w-full bg-transparent text-lg py-4 pr-3 focus:outline-none placeholder:text-[#b09060]"
+              className="w-full bg-transparent text-lg py-4 pr-3 focus:outline-none placeholder:text-[#8f6b92]"
               style={{
-                color: "#3d2008",
+                color: "#3b0855",
                 fontWeight: 600,
                 fontSize: "clamp(15px, 2.5vw, 20px)",
               }}
@@ -76,13 +76,11 @@ export default function NameEntryCard({ value, onChange, onSubmit, error }: Name
             className="shrink-0 px-7 font-extrabold tracking-widest uppercase select-none transition-all duration-100"
             style={{
               fontSize: "clamp(14px, 2.5vw, 20px)",
-              background: canSubmit
-                ? "linear-gradient(180deg, #ffb820 0%, #e88010 50%, #cc6808 100%)"
-                : "linear-gradient(180deg, #c8a870 0%, #a88850 100%)",
-              color: canSubmit ? "#fff" : "#c8a870",
-              borderLeft: "3px solid rgba(0,0,0,0.15)",
-              textShadow: canSubmit ? "0 2px 4px rgba(0,0,0,0.4)" : "none",
-              boxShadow: canSubmit ? "inset 0 1px 0 rgba(255,255,255,0.3)" : "none",
+              background: canSubmit ? "#ee227d" : "#b8a7ba",
+              color: canSubmit ? "#fff5de" : "#67506d",
+              borderLeft: "4px solid #3b0855",
+              textShadow: canSubmit ? "0 2px 0 #852467" : "none",
+              boxShadow: canSubmit ? "inset -6px -6px 0 #852467" : "none",
               cursor: canSubmit ? "pointer" : "not-allowed",
               minWidth: 90,
               letterSpacing: "0.12em",

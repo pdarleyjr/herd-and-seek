@@ -288,7 +288,8 @@ export interface MatchSession {
   createdAt: number;
 }
 
-export const WORLD_SIZE = 2000;
+/** Expanded challenge-map bounds. The open-world reserve uses its own 6000-unit space. */
+export const WORLD_SIZE = 2800;
 export const PLAYER_COLLISION_RADIUS = 34;
 export const PLAYER_RENDER_RADIUS = 48;
 export const NPC_COLLISION_RADIUS = 32;

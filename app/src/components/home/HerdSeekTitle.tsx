@@ -5,10 +5,10 @@ import { useViewportInfo } from "../../hooks/useViewportInfo";
 const WORD_STYLE: React.CSSProperties = {
   fontFamily: '"Arial Black", "Helvetica Neue", Impact, "Trebuchet MS", sans-serif',
   fontWeight: 900,
-  color: "#fffde0",
-  WebkitTextStroke: "7px #4a2208",
+  color: "#fff5de",
+  WebkitTextStroke: "7px #3b0855",
   textShadow: [
-    "5px 7px 0 #4a2208",
+    "5px 7px 0 #852467",
     "0 10px 20px rgba(0,0,0,0.45)",
     "0 2px 0 rgba(255,255,255,0.25)",
   ].join(", "),
@@ -20,10 +20,10 @@ const WORD_STYLE: React.CSSProperties = {
 const AMP_STYLE: React.CSSProperties = {
   fontFamily: '"Arial Black", "Helvetica Neue", Impact, "Trebuchet MS", sans-serif',
   fontWeight: 900,
-  color: "#ff9900",
-  WebkitTextStroke: "6px #7a3800",
+  color: "#ffd45c",
+  WebkitTextStroke: "6px #3b0855",
   textShadow: [
-    "4px 6px 0 #7a3800",
+    "4px 6px 0 #ee227d",
     "0 8px 16px rgba(0,0,0,0.4)",
   ].join(", "),
   letterSpacing: "0.04em",
@@ -50,24 +50,24 @@ export default function HerdSeekTitle() {
         <LeafCluster flip compact={isCompact} />
       </div>
 
-      {/* Backing badge — warm wooden plank */}
+      {/* Backing badge — chunky original toy-game plaque */}
       <div
         className="absolute inset-0 -mx-6 -my-3 rounded-3xl"
         style={{
-          background: "linear-gradient(160deg, #8b5c1e 0%, #6b3a0a 35%, #7c4a14 60%, #5a2e08 100%)",
-          boxShadow: "inset 0 2px 8px rgba(255,200,80,0.18), inset 0 -4px 8px rgba(0,0,0,0.35), 0 8px 32px rgba(0,0,0,0.5)",
-          border: "3px solid #4a2208",
+          background: "#852467",
+          boxShadow: "inset -8px -8px 0 #3b0855, 0 10px 0 #3b0855, 0 18px 32px rgba(59,8,85,0.32)",
+          border: "4px solid #3b0855",
         }}
       />
       {/* Badge rope accent top */}
       <div
         className="absolute -top-2 left-1/2 -translate-x-1/2 w-3/4 h-2 rounded-full"
-        style={{ background: "linear-gradient(90deg, transparent, #c8a050 20%, #e8c070 50%, #c8a050 80%, transparent)" }}
+        style={{ background: "#30c0b7", border: "3px solid #3b0855" }}
       />
       {/* Badge rope accent bottom */}
       <div
         className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3/4 h-2 rounded-full"
-        style={{ background: "linear-gradient(90deg, transparent, #c8a050 20%, #e8c070 50%, #c8a050 80%, transparent)" }}
+        style={{ background: "#fd8083", border: "3px solid #3b0855" }}
       />
 
       {/* Title text — stacked: HERD / & / SEEK */}
