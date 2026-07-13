@@ -17,7 +17,8 @@ async function signIn(page: Page, name: string) {
 async function createRoom(page: Page, name: string) {
   await signIn(page, name);
   await page.getByRole("button", { name: /Multiplayer/i }).click();
-  await page.getByRole("button", { name: /Create a Room/i }).click();
+  await page.getByRole("textbox", { name: /^Room name$/i }).fill(`Expedition ${name} ${Date.now()}`);
+  await page.getByRole("button", { name: /^Create room$/i }).click();
   const roomButton = page.getByRole("button", { name: /Copy room code/i });
   await expect(roomButton).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/Live link/i)).toBeVisible({ timeout: 15_000 });
@@ -28,7 +29,7 @@ async function joinRoom(page: Page, name: string, roomCode: string) {
   await signIn(page, name);
   await page.getByRole("button", { name: /Multiplayer/i }).click();
   await page.getByPlaceholder("ABCD-EFGH").fill(roomCode);
-  await page.getByRole("button", { name: /Join Room/i }).click();
+  await page.getByRole("button", { name: /Join by code/i }).click();
   await expect(page.getByText(/Live link/i)).toBeVisible({ timeout: 15_000 });
 }
 

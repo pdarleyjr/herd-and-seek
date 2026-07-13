@@ -3,6 +3,7 @@ import HomeBackground from "./HomeBackground";
 import HerdSeekTitle from "./HerdSeekTitle";
 import SafariCharacterLayer from "./SafariCharacterLayer";
 import NameEntryCard from "./NameEntryCard";
+import AudioControls from "../AudioControls";
 import { useViewportInfo } from "../../hooks/useViewportInfo";
 
 interface HomeScreenProps {
@@ -39,6 +40,7 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
       className="home-animated relative isolate w-dvw min-h-dvh overflow-hidden"
       style={{ userSelect: "none" }}
     >
+      <AudioControls compact className="home-audio-controls" />
       {/* Layered background: sky, sun, clouds, savanna, ground */}
       <HomeBackground />
 

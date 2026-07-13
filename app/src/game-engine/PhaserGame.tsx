@@ -6,6 +6,7 @@ import { createGameConfig } from "./gameConfig";
 import type { GameSceneVariant } from "./scenes/PreloadScene";
 import type { QualityTier } from "./types";
 import { gameAudio } from "./systems/AudioSystem";
+import AudioControls from "../components/AudioControls";
 import "./game.css";
 
 export interface PhaserGameProps {
@@ -40,7 +41,6 @@ export default function PhaserGame({
   const gameRef = useRef<Phaser.Game | null>(null);
   const [bridge] = useState(() => new GameBridge({ userId, username, send, localPosition: localPosRef }));
   const [quality, setQuality] = useState<QualityTier>("balanced");
-  const [audio, setAudio] = useState(() => gameAudio.settings());
 
   useEffect(() => {
     if (!hostRef.current || gameRef.current) return;
@@ -65,9 +65,22 @@ export default function PhaserGame({
     shellRef.current.dataset.localY = y.toFixed(2);
     shellRef.current.dataset.localSequence = String(sequence);
   }), [bridge]);
-  useEffect(() => bridge.events.on("SCENE_READY", ({ key }) => {
-    if (shellRef.current) shellRef.current.dataset.engineReady = key;
-  }), [bridge]);
+  useEffect(() => {
+    let detachAudio = () => {};
+    const unsubscribe = bridge.events.on("SCENE_READY", ({ key }) => {
+      if (shellRef.current) shellRef.current.dataset.engineReady = key;
+      detachAudio();
+      const scene = gameRef.current?.scene.getScene(key);
+      if (!scene) return;
+      const onCue = (cue: { kind: string; intensity: number }) => {
+        const surface = cue.kind === "water-splash" ? "water" : cue.kind === "footstep-rock" ? "rock" : cue.kind === "footstep-dirt" ? "sand" : cue.kind === "npc-rustle" ? "forest" : "grass";
+        gameAudio.footstep(surface, cue.intensity);
+      };
+      scene.events.on("environment-audio-cue", onCue);
+      detachAudio = () => scene.events.off("environment-audio-cue", onCue);
+    });
+    return () => { detachAudio(); unsubscribe(); };
+  }, [bridge]);
   useEffect(() => bridge.events.on("PLAYER_FEEDBACK", ({ kind, message }) => {
     if (!shellRef.current) return;
     shellRef.current.dataset.feedbackKind = kind;
@@ -115,10 +128,7 @@ export default function PhaserGame({
         </div>
       )}
       {variant === "match" && (
-        <div className="audio-picker" aria-label="Audio settings">
-          <button type="button" aria-label={audio.muted ? "Unmute game audio" : "Mute game audio"} onClick={() => { gameAudio.unlock(); gameAudio.setMuted(!audio.muted); setAudio(gameAudio.settings()); }}>{audio.muted ? "Audio off" : "Audio on"}</button>
-          <label><span>Volume</span><input type="range" min="0" max="1" step="0.1" value={audio.master} aria-label="Master volume" onChange={(event) => { gameAudio.setMaster(Number(event.target.value)); setAudio(gameAudio.settings()); }} /></label>
-        </div>
+        <AudioControls compact className="audio-picker" />
       )}
       {variant === "match" && (
         <label className="quality-picker">

@@ -26,6 +26,8 @@ export interface SessionRef {
   mode: MatchMode;
   hostUserId: string;
   createdAt: number;
+  /** Opaque room capability. Passwords are never persisted. */
+  accessToken?: string;
 }
 
 const SESSION_KEY = "hs_roomSession";
@@ -43,7 +45,8 @@ export function loadSession(): SessionRef | null {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionRef;
-    if (parsed && typeof parsed.roomId === "string" && (parsed.mode === "multiplayer" || parsed.mode === "solo")) {
+    if (parsed && typeof parsed.roomId === "string" && (parsed.mode === "multiplayer" || parsed.mode === "solo")
+      && (parsed.accessToken === undefined || typeof parsed.accessToken === "string")) {
       return parsed;
     }
   } catch {
@@ -65,7 +68,8 @@ export function soloRoomId(userId: string): string {
   return `solo:${userId}:${crypto.randomUUID()}`;
 }
 
-export function buildSocketUrl(roomId: string, userId: string, username: string): string {
+export function buildSocketUrl(roomId: string, userId: string, username: string, accessToken?: string): string {
   const qs = new URLSearchParams({ room: roomId, userId, username });
+  if (accessToken) qs.set("roomAccess", accessToken);
   return `${BACKEND_WS_ORIGIN}?${qs.toString()}`;
 }

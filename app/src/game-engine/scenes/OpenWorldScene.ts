@@ -3,10 +3,19 @@ import { DISTRICTS, OPEN_WORLD_WORLD_SIZE, type CollectibleNode, type OpenWorldP
 import { resolveContextAction, type ContextAction } from "../../open-world/openWorldControls";
 import type { OpenWorldBridge, OpenWorldSnapshot } from "../OpenWorldBridge";
 import { ensureAnimalTexture } from "../systems/AssetRegistry";
+import { EnvironmentalAudioCueSystem } from "../systems/EnvironmentalAudioCueSystem";
 import { InputManager } from "../systems/InputManager";
+import { LocomotionAnimationSystem, prefersReducedMotion, type LocomotionRole } from "../systems/LocomotionAnimationSystem";
+import { recommendQuality } from "../systems/QualityManager";
 import { RemotePlayerInterpolator } from "../systems/RemotePlayerInterpolator";
+import { createOpenWorldTerrainSurfaceSystem, type TerrainSample } from "../systems/TerrainSurfaceSystem";
+import { WaterRippleSystem } from "../systems/WaterRippleSystem";
+import type { QualityTier } from "../types";
 
 const LODGE = DISTRICTS.find((district) => district.id === "lodge")!;
+const WATERING_HOLE = DISTRICTS.find((district) => district.id === "wateringHole")!;
+const RIDGE = DISTRICTS.find((district) => district.id === "ridgeTrail")!;
+const MOONFERN = DISTRICTS.find((district) => district.id === "moonfernForest")!;
 const MOVE_SPEED = 320;
 const SYNC_INTERVAL_MS = 66;
 
@@ -24,14 +33,28 @@ export class OpenWorldScene extends Phaser.Scene {
   private local?: PlayerVisual;
   private readonly remotes = new Map<string, PlayerVisual>();
   private readonly collectibles = new Map<string, Phaser.GameObjects.Container>();
+  private readonly ambientNpcs = new Map<string, Phaser.GameObjects.Sprite>();
+  private readonly ambientNpcMotion = new Map<string, { x: number; y: number; time: number }>();
   private readonly interpolator = new RemotePlayerInterpolator(100);
+  private readonly locomotion = new LocomotionAnimationSystem();
+  private readonly terrain = createOpenWorldTerrainSurfaceSystem({
+    lodge: { x: LODGE.cx, y: LODGE.cy },
+    wateringHole: { x: WATERING_HOLE.cx, y: WATERING_HOLE.cy },
+    ridge: { x: RIDGE.cx, y: RIDGE.cy },
+    secondaryWater: [{ x: MOONFERN.cx - 30, y: MOONFERN.cy + 45, radiusX: 130, radiusY: 75 }],
+    trailDestinations: DISTRICTS.filter((district) => district.id !== "lodge").map((district) => ({ x: district.cx, y: district.cy })),
+  });
   private inputManager?: InputManager;
+  private ripples?: WaterRippleSystem;
+  private environmentalCues?: EnvironmentalAudioCueSystem;
   private joystick = { x: 0, y: 0 };
   private target: Phaser.Math.Vector2 | null = null;
   private currentAction: ContextAction | null = null;
   private syncElapsed = 0;
   private minimap?: Phaser.GameObjects.Graphics;
   private unsubscribers: Array<() => void> = [];
+  private quality: QualityTier = "balanced";
+  private reducedMotion = false;
 
   constructor(bridge: OpenWorldBridge) { super("OpenWorldScene"); this.bridge = bridge; }
 
@@ -45,7 +68,18 @@ export class OpenWorldScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, OPEN_WORLD_WORLD_SIZE, OPEN_WORLD_WORLD_SIZE);
     this.cameras.main.setBounds(0, 0, OPEN_WORLD_WORLD_SIZE, OPEN_WORLD_WORLD_SIZE).setBackgroundColor("#cba45c");
     this.inputManager = new InputManager(this);
+    this.reducedMotion = prefersReducedMotion();
+    this.quality = recommendQuality(window.devicePixelRatio || 1, navigator.hardwareConcurrency || 4);
     this.createReserve();
+    this.ripples = new WaterRippleSystem(this, {
+      quality: this.quality,
+      reducedMotion: this.reducedMotion,
+      onDisplacement: (cue) => this.events.emit("environment-displacement", cue),
+    });
+    this.environmentalCues = new EnvironmentalAudioCueSystem({
+      quality: this.quality,
+      emit: (cue) => this.events.emit("environment-audio-cue", cue),
+    });
     this.snapshot = this.bridge.snapshot;
     this.applySnapshot(this.snapshot);
     this.input.on("pointerup", this.handleWorldPointer, this);
@@ -72,10 +106,24 @@ export class OpenWorldScene extends Phaser.Scene {
     const length = Math.hypot(x, y);
     if (length > 1) { x /= length; y /= length; }
     const moving = Math.hypot(x, y) > 0.02;
-    this.local.sprite.setVelocity(x * MOVE_SPEED, y * MOVE_SPEED);
+    const localSurface = this.terrain.sample(this.local.sprite.x, this.local.sprite.y);
+    const localSpeed = MOVE_SPEED * localSurface.speedMultiplier;
+    const velocityX = x * localSpeed;
+    const velocityY = y * localSpeed;
+    this.local.sprite.setVelocity(velocityX, velocityY);
     if (x !== 0) this.local.sprite.setFlipX(x < 0);
-    this.local.sprite.setAngle(moving ? Math.sin(time / 85) * 2 : Math.sin(time / 340));
     this.updateVisualPosition(this.local, this.local.sprite.x, this.local.sprite.y);
+    const localPose = this.locomotion.update(this.bridge.runtime.userId, this.local, {
+      elapsedMs: time,
+      velocityX,
+      velocityY,
+      maxSpeed: MOVE_SPEED,
+      surface: localSurface,
+      role: "animal",
+      reducedMotion: this.reducedMotion,
+    });
+    this.local.nameplate.y -= localPose.bobPx * 0.22;
+    this.updateEnvironment(this.bridge.runtime.userId, "animal", this.local.sprite.x, this.local.sprite.y, Math.hypot(velocityX, velocityY), localSurface, time);
     this.bridge.reportPosition(this.local.sprite.x, this.local.sprite.y);
 
     this.syncElapsed += Math.min(delta, 100);
@@ -85,8 +133,24 @@ export class OpenWorldScene extends Phaser.Scene {
     }
     for (const [id, visual] of this.remotes) {
       const sample = this.interpolator.sample(id, Date.now());
-      if (sample) this.updateVisualPosition(visual, sample.x, sample.y);
+      if (!sample) continue;
+      const velocityX = (sample.x - visual.sprite.x) * 1_000 / Math.max(delta, 1);
+      const velocityY = (sample.y - visual.sprite.y) * 1_000 / Math.max(delta, 1);
+      this.updateVisualPosition(visual, sample.x, sample.y);
+      const surface = this.terrain.sample(sample.x, sample.y);
+      const pose = this.locomotion.update(id, visual, {
+        elapsedMs: time,
+        velocityX,
+        velocityY,
+        maxSpeed: MOVE_SPEED,
+        surface,
+        role: "animal",
+        reducedMotion: this.reducedMotion,
+      });
+      visual.nameplate.y -= pose.bobPx * 0.22;
+      this.updateEnvironment(id, "animal", sample.x, sample.y, Math.hypot(velocityX, velocityY), surface, time);
     }
+    this.updateAmbientNpcs(time, delta);
     this.refreshActionPrompt();
     this.drawMinimap();
   }
@@ -111,13 +175,15 @@ export class OpenWorldScene extends Phaser.Scene {
     this.createRidge();
     this.createGrove();
     this.createGrasslands();
+    this.createMoonfernForest();
+    this.createStrikerField();
     this.createAmbientDecor();
     for (const district of DISTRICTS) {
       this.add.text(district.cx, district.cy - (district.id === "lodge" ? 170 : 145), district.name, {
-        fontFamily: "Georgia, serif", fontSize: "28px", color: "#fff2bd", stroke: "#4a321d", strokeThickness: 6,
+        fontFamily: "Inter, Verdana, sans-serif", fontStyle: "bold", fontSize: "28px", color: "#fff7dd", stroke: "#3B0855", strokeThickness: 7,
       }).setOrigin(0.5).setDepth(900);
     }
-    this.add.text(LODGE.cx, LODGE.cy - 235, "SAVANNAH RESERVE", { fontFamily: "Georgia, serif", fontSize: "46px", color: "#fff0b8", stroke: "#4a2b1a", strokeThickness: 8 }).setOrigin(0.5).setDepth(900);
+    this.add.text(LODGE.cx, LODGE.cy - 235, "THE GRAND RESERVE", { fontFamily: "Inter, Verdana, sans-serif", fontStyle: "bold", fontSize: "46px", color: "#fff7dd", stroke: "#3B0855", strokeThickness: 9 }).setOrigin(0.5).setDepth(900);
     this.minimap = this.add.graphics().setScrollFactor(0).setDepth(2000);
   }
 
@@ -180,27 +246,78 @@ export class OpenWorldScene extends Phaser.Scene {
     const species = ["zebra", "gazelle", "wildebeest", "meerkat"] as const;
     for (let index = 0; index < 14; index += 1) {
       const sprite = this.add.sprite(district.cx - 260 + (index % 5) * 125, district.cy - 160 + Math.floor(index / 5) * 145, ensureAnimalTexture(this, species[index % species.length])).setDisplaySize(64, 64).setAlpha(0.7).setDepth(district.cy + index * 2);
-      this.tweens.add({ targets: sprite, x: sprite.x + 30 + index % 3 * 12, duration: 2600 + index * 180, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+      const actorId = `reserve-npc:${index}`;
+      this.ambientNpcs.set(actorId, sprite);
+      this.ambientNpcMotion.set(actorId, { x: sprite.x, y: sprite.y, time: 0 });
+      if (!this.reducedMotion) this.tweens.add({
+        targets: sprite,
+        x: sprite.x + 30 + index % 3 * 12,
+        y: sprite.y + (index % 2 ? 8 : -8),
+        duration: 2_600 + index * 180,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
     }
+  }
+
+  private createMoonfernForest(): void {
+    const district = DISTRICTS.find((item) => item.id === "moonfernForest")!;
+    this.add.ellipse(district.cx, district.cy, 760, 650, 0x3b0855, 0.25).setStrokeStyle(24, 0x30c0b7, 0.22).setDepth(-30);
+    this.add.ellipse(district.cx - 30, district.cy + 45, 260, 150, 0x498099, 0.92).setStrokeStyle(14, 0x30c0b7, 0.8).setDepth(-27);
+    for (let index = 0; index < 38; index += 1) {
+      const angle = index * 2.399;
+      const radius = 185 + (index % 7) * 34;
+      const x = district.cx + Math.cos(angle) * radius;
+      const y = district.cy + Math.sin(angle) * radius * 0.78;
+      const trunk = this.add.rectangle(x, y - 32, 16, 80, 0x852467).setStrokeStyle(4, 0x3b0855).setDepth(y - 2);
+      const crown = this.add.triangle(x, y - 105, -55, 55, 0, -62, 55, 55, index % 3 ? 0x30c0b7 : 0x498099).setStrokeStyle(5, 0x3b0855).setDepth(y - 1);
+      if (!this.reducedMotion && index % 3 === 0) this.tweens.add({ targets: [trunk, crown], angle: { from: -0.7, to: 0.7 }, duration: 2300 + index * 35, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    }
+    for (let index = 0; index < 12; index += 1) {
+      const glow = this.add.circle(district.cx - 250 + index * 43, district.cy + (index % 2 ? 235 : -225), 6, 0xfd8083, 0.75).setDepth(district.cy + 2);
+      if (!this.reducedMotion) this.tweens.add({ targets: glow, alpha: 0.2, scale: 1.7, duration: 900 + index * 70, yoyo: true, repeat: -1 });
+    }
+  }
+
+  private createStrikerField(): void {
+    const district = DISTRICTS.find((item) => item.id === "strikerField")!;
+    const width = 760;
+    const height = 470;
+    this.add.rectangle(district.cx, district.cy, width + 70, height + 70, 0x3b0855, 0.78).setStrokeStyle(10, 0x852467).setDepth(-30);
+    this.add.rectangle(district.cx, district.cy, width, height, 0x30c0b7, 0.82).setStrokeStyle(8, 0xfff7dd).setDepth(-29);
+    const markings = this.add.graphics().setDepth(-28).lineStyle(8, 0xfff7dd, 0.86);
+    markings.lineBetween(district.cx, district.cy - height / 2, district.cx, district.cy + height / 2);
+    markings.strokeCircle(district.cx, district.cy, 72);
+    markings.strokeRect(district.cx - width / 2, district.cy - 110, 105, 220);
+    markings.strokeRect(district.cx + width / 2 - 105, district.cy - 110, 105, 220);
+    for (const direction of [-1, 1]) {
+      const goalX = district.cx + direction * (width / 2 + 30);
+      this.add.rectangle(goalX, district.cy, 55, 170, 0xffffff, 0.18).setStrokeStyle(8, 0xffffff, 0.88).setDepth(-26);
+    }
+    const ball = this.add.circle(district.cx, district.cy, 18, 0xfff7dd).setStrokeStyle(6, 0x3b0855).setDepth(district.cy + 1);
+    if (!this.reducedMotion) this.tweens.add({ targets: ball, scale: 1.12, duration: 750, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
   }
 
   private createAmbientDecor(): void {
     const random = new Phaser.Math.RandomDataGenerator(["reserve-phaser-v1"]);
-    for (let index = 0; index < 240; index += 1) {
+    const grassCount = this.quality === "high" ? 620 : this.quality === "balanced" ? 460 : 300;
+    for (let index = 0; index < grassCount; index += 1) {
       const x = random.between(50, OPEN_WORLD_WORLD_SIZE - 50);
       const y = random.between(50, OPEN_WORLD_WORLD_SIZE - 50);
       if (Phaser.Math.Distance.Between(x, y, LODGE.cx, LODGE.cy) < 230) continue;
       const grass = this.add.star(x, y, 4, 2, random.between(9, 17), index % 8 ? 0x8e8c3d : 0xc29243, random.realInRange(0.28, 0.65)).setDepth(y - 3);
-      this.tweens.add({ targets: grass, angle: random.between(-6, 6), duration: random.between(1500, 3000), yoyo: true, repeat: -1 });
+      if (!this.reducedMotion && index % 3 === 0) this.tweens.add({ targets: grass, angle: random.between(-6, 6), duration: random.between(1500, 3000), yoyo: true, repeat: -1 });
     }
-    for (let index = 0; index < 25; index += 1) this.addAcacia(random.between(120, OPEN_WORLD_WORLD_SIZE - 120), random.between(120, OPEN_WORLD_WORLD_SIZE - 120), random.realInRange(0.65, 1.05));
+    const treeCount = this.quality === "high" ? 58 : this.quality === "balanced" ? 44 : 30;
+    for (let index = 0; index < treeCount; index += 1) this.addAcacia(random.between(120, OPEN_WORLD_WORLD_SIZE - 120), random.between(120, OPEN_WORLD_WORLD_SIZE - 120), random.realInRange(0.65, 1.05));
   }
 
   private addAcacia(x: number, y: number, scale: number): void {
     const shadow = this.add.ellipse(x + 28, y + 22, 125 * scale, 35 * scale, 0x3d2c19, 0.26).setDepth(y - 2);
     const trunk = this.add.rectangle(x, y - 25 * scale, 18 * scale, 105 * scale, 0x61452d).setDepth(y - 1);
     const canopy = this.add.ellipse(x, y - 90 * scale, 150 * scale, 62 * scale, 0x536f37).setStrokeStyle(5, 0x35492b).setDepth(y);
-    this.tweens.add({ targets: [canopy, trunk, shadow], angle: { from: -0.6, to: 0.6 }, duration: 2500 + (x % 700), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    if (!this.reducedMotion) this.tweens.add({ targets: [canopy, trunk, shadow], angle: { from: -0.6, to: 0.6 }, duration: 2500 + (x % 700), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
   }
 
   private applySnapshot(snapshot: OpenWorldSnapshot): void {
@@ -224,7 +341,10 @@ export class OpenWorldScene extends Phaser.Scene {
 
   private syncRemotes(state: OpenWorldZoneState): void {
     const active = new Set(state.players.filter((player) => player.id !== this.bridge.runtime.userId).map((player) => player.id));
-    for (const [id, visual] of this.remotes) if (!active.has(id)) { visual.sprite.destroy(); visual.shadow.destroy(); visual.nameplate.destroy(); visual.highlight?.destroy(); this.remotes.delete(id); this.interpolator.remove(id); }
+    for (const [id, visual] of this.remotes) if (!active.has(id)) {
+      this.locomotion.forget(id); this.ripples?.remove(id); this.environmentalCues?.remove(id);
+      visual.sprite.destroy(); visual.shadow.destroy(); visual.nameplate.destroy(); visual.highlight?.destroy(); this.remotes.delete(id); this.interpolator.remove(id);
+    }
     for (const player of state.players) {
       if (player.id === this.bridge.runtime.userId) continue;
       let visual = this.remotes.get(player.id);
@@ -247,6 +367,34 @@ export class OpenWorldScene extends Phaser.Scene {
     visual.shadow.setPosition(x, y + 32).setDepth(y - 2);
     visual.nameplate.setPosition(x, y - 58);
     visual.highlight?.setPosition(x, y).setDepth(y - 1);
+  }
+
+  private updateAmbientNpcs(now: number, delta: number): void {
+    for (const [actorId, sprite] of this.ambientNpcs) {
+      const previous = this.ambientNpcMotion.get(actorId) ?? { x: sprite.x, y: sprite.y, time: now - delta };
+      const elapsed = previous.time > 0 ? Math.max(now - previous.time, 1) : Math.max(delta, 1);
+      const velocityX = (sprite.x - previous.x) * 1_000 / elapsed;
+      const velocityY = (sprite.y - previous.y) * 1_000 / elapsed;
+      const surface = this.terrain.sample(sprite.x, sprite.y);
+      this.locomotion.update(actorId, { sprite }, {
+        elapsedMs: now,
+        velocityX,
+        velocityY,
+        maxSpeed: 110,
+        surface,
+        role: "npc",
+        reducedMotion: this.reducedMotion,
+      });
+      if (Math.abs(velocityX) > 0.5) sprite.setFlipX(velocityX < 0);
+      sprite.setDepth(sprite.y);
+      this.updateEnvironment(actorId, "npc", sprite.x, sprite.y, Math.hypot(velocityX, velocityY), surface, now);
+      this.ambientNpcMotion.set(actorId, { x: sprite.x, y: sprite.y, time: now });
+    }
+  }
+
+  private updateEnvironment(actorId: string, role: LocomotionRole, x: number, y: number, speed: number, surface: TerrainSample, now: number): void {
+    this.ripples?.update({ actorId, x, y, speed, surface, nowMs: now });
+    this.environmentalCues?.update({ actorId, role, x, y, speed, surface, nowMs: now });
   }
 
   private syncCollectibles(state: OpenWorldZoneState): void {
@@ -294,17 +442,25 @@ export class OpenWorldScene extends Phaser.Scene {
     const x = this.scale.width - size - 16;
     const y = this.scale.height - size - 104;
     const scale = size / OPEN_WORLD_WORLD_SIZE;
-    this.minimap.clear().fillStyle(0x2e2319, 0.82).fillRoundedRect(x - 6, y - 6, size + 12, size + 12, 14).fillStyle(0xc19a54, 0.95).fillRoundedRect(x, y, size, size, 9);
-    for (const district of DISTRICTS) this.minimap.fillStyle(district.id === "wateringHole" ? 0x2e8daf : district.id === "lodge" ? 0xf1c15b : 0x56723c, 1).fillCircle(x + district.cx * scale, y + district.cy * scale, district.id === "lodge" ? 5 : 4);
-    this.minimap.fillStyle(0xfff284, 1).fillCircle(x + this.local.sprite.x * scale, y + this.local.sprite.y * scale, 4);
-    this.minimap.lineStyle(2, 0xffed9c, 0.8).strokeRoundedRect(x, y, size, size, 9);
+    this.minimap.clear().fillStyle(0x3b0855, 0.88).fillRoundedRect(x - 6, y - 6, size + 12, size + 12, 14).fillStyle(0xfff1cf, 0.94).fillRoundedRect(x, y, size, size, 9);
+    for (const district of DISTRICTS) {
+      const color = district.id === "wateringHole" ? 0x498099 : district.id === "moonfernForest" ? 0x852467 : district.id === "strikerField" ? 0x30c0b7 : district.id === "lodge" ? 0xee227d : 0x7d9c50;
+      this.minimap.fillStyle(color, 1).fillCircle(x + district.cx * scale, y + district.cy * scale, district.id === "lodge" ? 5 : 4);
+    }
+    this.minimap.fillStyle(0xfd8083, 1).fillCircle(x + this.local.sprite.x * scale, y + this.local.sprite.y * scale, 4);
+    this.minimap.lineStyle(3, 0x3b0855, 0.85).strokeRoundedRect(x, y, size, size, 9);
   }
 
   private cleanup(): void {
     this.inputManager?.destroy();
     this.input.off("pointerup", this.handleWorldPointer, this);
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+    this.ripples?.destroy();
+    this.environmentalCues?.clear();
+    this.locomotion.destroy();
     this.interpolator.clear();
+    this.ambientNpcs.clear();
+    this.ambientNpcMotion.clear();
     this.bridge.reportPrompt(null);
   }
 }

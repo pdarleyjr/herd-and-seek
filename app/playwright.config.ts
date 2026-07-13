@@ -16,7 +16,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "functional-desktop", testMatch: /(?:phaser-smoke|multiplayer|open-world|perks|admin|performance)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
+    { name: "functional-desktop", testMatch: /(?:phaser-smoke|multiplayer|open-world|perks|admin|performance|soccer)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
     { name: "functional-mobile", testMatch: /mobile-gameplay\.spec\.ts/, use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } } },
     { name: "desktop-1920", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } } },
     { name: "lobby-problem-1714", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1714, height: 895 } } },

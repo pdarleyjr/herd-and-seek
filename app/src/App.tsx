@@ -11,6 +11,7 @@ import ModernLobby from "./components/lobby/ModernLobby";
 import ModeSelect from "./components/ModeSelect";
 import RoomBrowser from "./components/RoomBrowser";
 import SoloSetup from "./components/SoloSetup";
+import SoccerSetup, { type SoccerSetupSelection } from "./components/SoccerSetup";
 import { useGameSocket } from "./useGameSocket";
 import { useProfile } from "./hooks/useProfile";
 import {
@@ -29,7 +30,6 @@ import {
 } from "./types";
 import { soundManager } from "./SoundManager";
 import {
-  generateRoomCode,
   soloRoomId,
   saveSession,
   clearSession,
@@ -40,17 +40,20 @@ import {
 type AppRoute =
   | { type: "HOME" }
   | { type: "MODE_SELECT" }
-  | { type: "ROOM_BROWSER" }
+  | { type: "ROOM_BROWSER"; activity: "hunt" | "soccer" }
   | { type: "MATCH_LOBBY"; roomId: string }
   | { type: "MATCH_COUNTDOWN"; roomId: string }
   | { type: "MATCH_PLAYING"; roomId: string }
   | { type: "MATCH_RESULTS"; roomId: string }
   | { type: "SOLO_SETUP" }
   | { type: "SOLO_PLAYING"; roomId: string }
-  | { type: "OPEN_WORLD"; zoneId: "savannahReserve" };
+  | { type: "OPEN_WORLD"; zoneId: "savannahReserve" }
+  | { type: "SOCCER_SETUP" }
+  | { type: "SOCCER_PLAYING"; network?: { roomId: string; accessToken?: string } };
 
 const GAME_RENDERER = resolveRendererMode(import.meta.env.VITE_GAME_RENDERER);
 const PhaserGame = lazy(() => import("./game-engine/PhaserGame"));
+const SoccerGame = lazy(() => import("./components/SoccerGame"));
 
 function readSavedSession() {
   if (typeof window === "undefined") return { userId: "", username: "" };
@@ -105,11 +108,16 @@ export default function App() {
   const [selectedAnimal, setSelectedAnimal] = useState<AnimalType>("rabbit");
   const [selectedLevel, setSelectedLevel] = useState<LevelId>("forest");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
+  const [soccerSelection, setSoccerSelection] = useState<SoccerSetupSelection>({ team: "coral", format: "quick", teamSize: 5 });
   const [endCountdown, setEndCountdown] = useState<number | null>(null);
   const [decoySpawn, setDecoySpawn] = useState<(DecoySpawnPayload & { receivedAt: number }) | null>(null);
   const localPosRef = useRef({ x: 100, y: 100 });
   const debugMode = isDebug();
   const fps = useFps(debugMode);
+
+  useEffect(() => {
+    void soundManager.startMusic(route.type.startsWith("SOCCER") ? "soccer" : "reserve");
+  }, [route.type]);
 
   const { profile, setProfile, refresh: refreshProfile } = useProfile(userId, username);
   const [showShop, setShowShop] = useState(false);
@@ -239,6 +247,7 @@ export default function App() {
     roomId: activeRoomId,
     userId,
     username,
+    accessToken: session?.accessToken,
     onMessage: handleSocketMessage,
     onStatusChange: setStatus,
   });
@@ -272,15 +281,22 @@ export default function App() {
   }, [endCountdown, gameState?.phase, returnToLobby, route]);
 
   // ── Room / mode navigation ──
-  const goCreateRoom = useCallback(() => {
-    const code = generateRoomCode();
-    const s: SessionRef = { roomId: code, mode: "multiplayer", hostUserId: userId, createdAt: Date.now() };
+  const goCreateRoom = useCallback((code: string, accessToken?: string) => {
+    if (route.type === "ROOM_BROWSER" && route.activity === "soccer") {
+      clearSession(); setSession(null); setRoute({ type: "SOCCER_PLAYING", network: { roomId: code, ...(accessToken ? { accessToken } : {}) } });
+      return;
+    }
+    const s: SessionRef = { roomId: code, mode: "multiplayer", hostUserId: userId, createdAt: Date.now(), ...(accessToken ? { accessToken } : {}) };
     saveSession(s); setSession(s); setRoute({ type: "MATCH_LOBBY", roomId: code });
-  }, [userId]);
-  const goJoinRoom = useCallback((code: string) => {
-    const s: SessionRef = { roomId: code, mode: "multiplayer", hostUserId: "", createdAt: Date.now() };
+  }, [route, userId]);
+  const goJoinRoom = useCallback((code: string, accessToken?: string) => {
+    if (route.type === "ROOM_BROWSER" && route.activity === "soccer") {
+      clearSession(); setSession(null); setRoute({ type: "SOCCER_PLAYING", network: { roomId: code, ...(accessToken ? { accessToken } : {}) } });
+      return;
+    }
+    const s: SessionRef = { roomId: code, mode: "multiplayer", hostUserId: "", createdAt: Date.now(), ...(accessToken ? { accessToken } : {}) };
     saveSession(s); setSession(s); setRoute({ type: "MATCH_LOBBY", roomId: code });
-  }, []);
+  }, [route]);
   const goSolo = useCallback(() => {
     const s: SessionRef = { roomId: soloRoomId(userId), mode: "solo", hostUserId: userId, createdAt: Date.now() };
     saveSession(s); setSession(s); setRoute({ type: "SOLO_SETUP" });
@@ -319,6 +335,10 @@ export default function App() {
   }, [send]);
   const goOpenWorld = useCallback(() => setRoute({ type: "OPEN_WORLD", zoneId: "savannahReserve" }), []);
   const exitOpenWorld = useCallback(() => setRoute({ type: "MODE_SELECT" }), []);
+  const startSoccer = useCallback((selection: SoccerSetupSelection) => {
+    setSoccerSelection(selection);
+    setRoute(selection.format === "crew" ? { type: "ROOM_BROWSER", activity: "soccer" } : { type: "SOCCER_PLAYING" });
+  }, []);
 
   const isHost = !!gameState && gameState.hostUserId === userId;
 
@@ -326,16 +346,22 @@ export default function App() {
     return <HomeScreen nameInput={username} onNameChange={setUsername} onSubmit={handleAuth} />;
   }
   if (route.type === "MODE_SELECT") {
-    return <ModeSelect onMultiplayer={() => setRoute({ type: "ROOM_BROWSER" })} onSolo={goSolo} onOpenWorld={goOpenWorld} />;
+    return <ModeSelect onMultiplayer={() => setRoute({ type: "ROOM_BROWSER", activity: "hunt" })} onSolo={goSolo} onOpenWorld={goOpenWorld} onSoccer={() => setRoute({ type: "SOCCER_SETUP" })} />;
   }
   if (route.type === "ROOM_BROWSER") {
-    return <RoomBrowser onCreate={goCreateRoom} onJoin={goJoinRoom} onBack={() => setRoute({ type: "MODE_SELECT" })} />;
+    return <RoomBrowser activity={route.activity} defaultMaxPlayers={route.activity === "soccer" ? soccerSelection.teamSize * 2 : 8} onCreate={goCreateRoom} onJoin={goJoinRoom} onBack={() => setRoute(route.activity === "soccer" ? { type: "SOCCER_SETUP" } : { type: "MODE_SELECT" })} />;
   }
   if (route.type === "SOLO_SETUP") {
     return <SoloSetup onStart={startSolo} onBack={() => { clearSession(); setSession(null); setRoute({ type: "MODE_SELECT" }); }} />;
   }
   if (route.type === "OPEN_WORLD") {
     return <OpenWorldScreen userId={userId} username={username} animalType="zebra" onExit={exitOpenWorld} />;
+  }
+  if (route.type === "SOCCER_SETUP") {
+    return <SoccerSetup playerName={username} onStart={startSoccer} onBack={() => setRoute({ type: "MODE_SELECT" })} />;
+  }
+  if (route.type === "SOCCER_PLAYING") {
+    return <Suspense fallback={<div className="absolute inset-0 grid place-items-center bg-[#498099] text-[#fff5de] font-bold">Marking the pitch…</div>}><SoccerGame userId={userId} username={username} selection={soccerSelection} network={route.network} onExit={() => setRoute({ type: "SOCCER_SETUP" })} /></Suspense>;
   }
 
   if (route.type === "MATCH_LOBBY" && session?.mode === "multiplayer") {

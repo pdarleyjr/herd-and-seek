@@ -14,6 +14,12 @@ const ROLES = [
   { value: "random" as const, mark: "?", label: "Surprise me", detail: "Let the reserve choose your role." },
 ];
 
+const DIFFICULTIES: Record<SoloDifficulty, { label: string; detail: string }> = {
+  easy: { label: "Easy", detail: "Slower reactions, wider misses, and generous hunter resources." },
+  normal: { label: "Medium", detail: "Balanced tracking, evasion, resources, and rewards." },
+  hard: { label: "Hard", detail: "Faster decisions, coordinated evasion, sharp aim, and tight resources." },
+};
+
 export default function SoloSetup({ onStart, onBack }: SoloSetupProps) {
   const [role, setRole] = useState<"hunter" | "animal" | "random">("random");
   const [botCount, setBotCount] = useState(4);
@@ -40,7 +46,7 @@ export default function SoloSetup({ onStart, onBack }: SoloSetupProps) {
         </section>
 
         <section className="solo-card solo-card--map">
-          <Heading step="02" title="Pick the terrain" />
+          <Heading step="02" title="Choose a challenge district" />
           <div className="solo-map-grid">
             {LEVEL_ORDER.map((id) => <button type="button" key={id} className={level === id ? "is-picked" : ""} onClick={() => selectLevel(id)} aria-pressed={level === id}><i className={`solo-biome solo-biome--${id}`} /><strong>{LEVELS[id].displayName}</strong><span>{LEVELS[id].subtitle}</span></button>)}
           </div>
@@ -55,12 +61,12 @@ export default function SoloSetup({ onStart, onBack }: SoloSetupProps) {
 
         <section className="solo-card solo-card--rules">
           <Heading step="04" title="Set the challenge" />
-          <fieldset><legend>Difficulty</legend><div className="solo-segmented">{(["easy", "normal", "hard"] as SoloDifficulty[]).map((item) => <button key={item} type="button" className={difficulty === item ? "is-picked" : ""} onClick={() => setDifficulty(item)} aria-pressed={difficulty === item}>{item}</button>)}</div></fieldset>
+          <fieldset><legend>Difficulty</legend><div className="solo-segmented">{(["easy", "normal", "hard"] as SoloDifficulty[]).map((item) => <button key={item} type="button" className={difficulty === item ? "is-picked" : ""} onClick={() => setDifficulty(item)} aria-pressed={difficulty === item}>{DIFFICULTIES[item].label}</button>)}</div><p className="solo-difficulty-copy">{DIFFICULTIES[difficulty].detail}</p></fieldset>
           <label>Bots <strong>{botCount}</strong><input aria-label="Bot count" type="range" min={2} max={12} value={botCount} onChange={(event) => setBotCount(Number(event.target.value))} /></label>
           <label>Round length<select aria-label="Solo round length" value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={30}>30 seconds</option><option value={60}>1 minute</option><option value={120}>2 minutes</option><option value={180}>3 minutes</option><option value={300}>5 minutes</option></select></label>
         </section>
       </div>
-      <footer className="solo-camp__footer"><div><small>Field plan</small><strong>{ROLES.find((item) => item.value === role)?.label} · {LEVELS[level].displayName} · {difficulty}</strong></div><button type="button" onClick={() => onStart({ role, botCount, level, animal, perk, duration, difficulty })}><span>Start solo expedition</span><small>Launch with {botCount} AI players</small></button></footer>
+      <footer className="solo-camp__footer"><div><small>Field plan</small><strong>{ROLES.find((item) => item.value === role)?.label} · {LEVELS[level].displayName} · {DIFFICULTIES[difficulty].label}</strong></div><button type="button" onClick={() => onStart({ role, botCount, level, animal, perk, duration, difficulty })}><span>Start solo expedition</span><small>Launch with {botCount} AI players</small></button></footer>
     </main>
   );
 }

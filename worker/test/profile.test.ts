@@ -21,7 +21,9 @@ import {
   allowedMovementDistance,
   safeMatchSpawn,
   difficultyMultiplier,
+  DIFFICULTY_TUNING,
   collectibleInRange,
+  boundedOpenWorldPosition,
   resolveReadyState,
   type PlayerProfile,
   type QuestDefinition,
@@ -81,19 +83,31 @@ describe("authoritative perk rules", () => {
   it("keeps every supported match spawn inside the collider-free meadow", () => {
     const spawns = Array.from({ length: 16 }, (_, index) => safeMatchSpawn(index));
     expect(new Set(spawns.map((spawn) => `${spawn.x}:${spawn.y}`)).size).toBe(16);
-    expect(spawns.every((spawn) => spawn.x >= 110 && spawn.x <= 380 && spawn.y >= 110 && spawn.y <= 380)).toBe(true);
+    expect(spawns.every((spawn) => spawn.x >= 580 && spawn.x <= 2_220 && spawn.y >= 580 && spawn.y <= 2_220)).toBe(true);
+    expect(spawns[0]).toEqual({ x: 1_400, y: 1_400 });
   });
 
   it("scales solo AI without changing normal difficulty", () => {
     expect(difficultyMultiplier("easy")).toBeLessThan(1);
     expect(difficultyMultiplier("normal")).toBe(1);
     expect(difficultyMultiplier("hard")).toBeGreaterThan(1);
+    expect(DIFFICULTY_TUNING.easy.shotCooldownMs).toBeGreaterThan(DIFFICULTY_TUNING.normal.shotCooldownMs);
+    expect(DIFFICULTY_TUNING.normal.shotCooldownMs).toBeGreaterThan(DIFFICULTY_TUNING.hard.shotCooldownMs);
+    expect(DIFFICULTY_TUNING.hard.rewardMultiplier).toBeGreaterThan(DIFFICULTY_TUNING.normal.rewardMultiplier);
+    expect(DIFFICULTY_TUNING.easy.humanHunterAmmo).toBeGreaterThan(DIFFICULTY_TUNING.hard.humanHunterAmmo);
   });
 
   it("requires an authoritative nearby position for Open World collection", () => {
     expect(collectibleInRange({ x: 100, y: 100 }, { x: 250, y: 200 })).toBe(true);
     expect(collectibleInRange({ x: 100, y: 100 }, { x: 500, y: 500 })).toBe(false);
     expect(collectibleInRange({ x: Number.NaN, y: 100 }, { x: 100, y: 100 })).toBe(false);
+  });
+
+  it("bounds Open World movement while preserving ordinary prediction updates", () => {
+    expect(boundedOpenWorldPosition({ x: 1_000, y: 1_000 }, { x: 1_050, y: 1_020 }, 100)).toEqual({ x: 1_050, y: 1_020 });
+    const blockedTeleport = boundedOpenWorldPosition({ x: 1_000, y: 1_000 }, { x: 5_000, y: 5_000 }, 100);
+    expect(Math.hypot(blockedTeleport.x - 1_000, blockedTeleport.y - 1_000)).toBeCloseTo(82, 5);
+    expect(boundedOpenWorldPosition({ x: 100, y: 100 }, { x: Number.NaN, y: undefined }, 100)).toEqual({ x: 100, y: 100 });
   });
 
   it("charges authoritative ammo for an AI trigger pull", () => {

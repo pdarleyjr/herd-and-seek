@@ -79,8 +79,8 @@ export function newProfile(userId: string, username: string) {
     dailyQuestDate: "",
     openWorld: {
       lastZoneId: null as string | null,
-      lastX: 1500,
-      lastY: 1500,
+      lastX: 3000,
+      lastY: 3000,
       discoveredZones: [] as string[],
       collectedNodeIds: [] as string[],
     },

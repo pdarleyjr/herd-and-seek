@@ -1,0 +1,161 @@
+.soccer-setup {
+  --plum: #3b0855;
+  --plum-2: #5b176b;
+  --cream: #fff3d5;
+  --ink: #32123d;
+  --coral: #ee227d;
+  --coral-soft: #fd8083;
+  --teal: #30c0b7;
+  --teal-deep: #25758a;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  position: relative;
+  color: var(--ink);
+  background: #f8d6aa;
+  font-family: "Trebuchet MS", "Avenir Next", sans-serif;
+  isolation: isolate;
+}
+
+.soccer-setup::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  background:
+    radial-gradient(circle at 76% 8%, #fff0ba 0 9%, transparent 28%),
+    linear-gradient(148deg, #ffc1a6 0 37%, #fd8083 37% 57%, #852467 57% 100%);
+}
+
+.soccer-setup__sky { position: fixed; inset: 0; overflow: hidden; z-index: -2; pointer-events: none; }
+.soccer-setup__sky i { position: absolute; width: 34vw; height: 34vw; border: clamp(18px, 2vw, 34px) solid rgb(255 243 213 / .14); transform: rotate(18deg); border-radius: 18%; }
+.soccer-setup__sky i:nth-child(1) { left: -18vw; top: 30vh; }
+.soccer-setup__sky i:nth-child(2) { right: -21vw; top: -15vw; }
+.soccer-setup__sky i:nth-child(3) { width: 13vw; height: 13vw; left: 42%; top: 16%; border-radius: 50%; }
+.soccer-setup__sky i:nth-child(4) { width: 8vw; height: 8vw; left: 6%; top: 7%; transform: rotate(45deg); }
+
+.soccer-setup__topbar { min-height: 78px; padding: 12px clamp(20px, 4vw, 68px); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; position: relative; z-index: 4; }
+.soccer-setup__back { justify-self: start; min-height: 46px; padding: 0 18px; border: 0; border-radius: 999px; color: var(--cream); background: rgb(59 8 85 / .86); font: 800 15px/1 "Trebuchet MS", sans-serif; cursor: pointer; transition: transform 180ms ease-out, background 180ms ease-out; }
+.soccer-setup__back:hover { transform: translateX(-3px); background: var(--plum); }
+.soccer-setup__back:focus-visible, .soccer-setup button:focus-visible { outline: 4px solid #fff1a8; outline-offset: 3px; }
+.soccer-setup__league-mark { display: flex; gap: 10px; align-items: center; color: var(--cream); text-transform: uppercase; letter-spacing: .08em; }
+.soccer-setup__league-mark > span { width: 44px; height: 44px; display: grid; place-items: center; position: relative; border: 4px solid var(--cream); border-radius: 13px 13px 18px 18px; transform: rotate(-3deg); }
+.soccer-setup__league-mark > span i { width: 17px; height: 17px; border: 3px solid var(--cream); border-radius: 50%; }
+.soccer-setup__league-mark > span b { position: absolute; bottom: -4px; width: 22px; height: 7px; border-radius: 50%; background: var(--cream); }
+.soccer-setup__league-mark strong, .soccer-setup__league-mark small { display: block; }
+.soccer-setup__league-mark strong { font-size: 16px; }
+.soccer-setup__league-mark small { margin-top: 2px; font-size: 9px; opacity: .78; }
+.soccer-setup__player { justify-self: end; margin: 0; color: var(--cream); text-align: right; }
+.soccer-setup__player span, .soccer-setup__player strong { display: block; }
+.soccer-setup__player span { font-size: 10px; text-transform: uppercase; letter-spacing: .16em; opacity: .76; }
+.soccer-setup__player strong { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+
+.soccer-setup__stage { width: min(1320px, calc(100% - 40px)); margin: clamp(14px, 2.5vh, 34px) auto 0; display: grid; grid-template-columns: minmax(310px, .8fr) minmax(480px, 1.35fr); align-items: center; gap: clamp(20px, 4vw, 70px); }
+.soccer-setup__copy { color: var(--cream); padding-left: clamp(0px, 2vw, 28px); }
+.soccer-setup__eyebrow { margin: 0 0 10px; font-size: clamp(12px, 1.25vw, 16px); font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: #ffe6a3; }
+.soccer-setup__copy h1 { margin: 0; max-width: 8ch; font: 950 clamp(52px, 7vw, 106px)/.82 "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; letter-spacing: -.07em; text-shadow: 0 8px 0 rgb(59 8 85 / .24); }
+.soccer-setup__copy > p:not(.soccer-setup__eyebrow) { max-width: 48ch; margin: 22px 0; color: #ffe8cf; font-size: clamp(15px, 1.35vw, 19px); line-height: 1.55; font-weight: 650; }
+.soccer-setup__match-note { display: flex; align-items: center; gap: 12px; width: min(430px, 100%); }
+.soccer-setup__match-note > span { display: flex; padding-left: 8px; }
+.soccer-setup__match-note i { width: 24px; height: 24px; margin-left: -8px; border: 3px solid var(--cream); border-radius: 50%; background: var(--teal); }
+.soccer-setup__match-note i:nth-child(2) { background: var(--coral); }
+.soccer-setup__match-note i:nth-child(3) { background: #f5b74f; }
+.soccer-setup__match-note p { margin: 0; color: #ffe8cf; font-size: 12px; line-height: 1.35; }
+.soccer-setup__match-note strong { color: var(--cream); }
+
+.soccer-stadium { min-width: 0; filter: drop-shadow(0 24px 18px rgb(59 8 85 / .22)); animation: soccer-stadium-enter 700ms cubic-bezier(.16, 1, .3, 1) both; }
+.soccer-stadium svg { display: block; width: 100%; height: auto; overflow: visible; }
+.soccer-stadium > p { width: max-content; margin: -36px 8% 0 auto; padding: 9px 14px; border-radius: 999px; color: var(--cream); background: var(--plum); font-weight: 850; font-size: 12px; transform: rotate(-2deg); }
+.soccer-stadium > p span { margin-right: 8px; color: #ffc864; text-transform: uppercase; letter-spacing: .12em; font-size: 9px; }
+.soccer-stadium__player { transform-box: fill-box; transform-origin: center bottom; animation: soccer-player-idle 1.25s ease-in-out infinite alternate; }
+.soccer-stadium__player--teal { animation-delay: -.6s; }
+.soccer-stadium__ball { transform-box: fill-box; transform-origin: center; animation: soccer-ball-idle 2.2s ease-in-out infinite; }
+
+.soccer-setup__console { width: min(1380px, calc(100% - 32px)); margin: clamp(22px, 4vh, 50px) auto 22px; padding: clamp(18px, 2vw, 28px); display: grid; grid-template-columns: 1.22fr .88fr .68fr; gap: clamp(18px, 2vw, 32px); border: 1px solid rgb(255 243 213 / .55); border-radius: 30px; background: rgb(255 243 213 / .94); box-shadow: 0 18px 50px rgb(59 8 85 / .2), inset 0 1px 0 #fff9e8; }
+.soccer-setup fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.soccer-setup legend { padding: 0; margin: 0 0 10px; color: #6b4f67; font-size: 11px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
+.soccer-setup__teams { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.soccer-setup__teams legend { grid-column: 1 / -1; }
+.soccer-team { min-height: 122px; padding: 14px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; border: 2px solid #e0cfbf; border-radius: 20px; color: var(--ink); background: #fff9e9; text-align: left; cursor: pointer; transition: transform 180ms ease-out, border-color 180ms ease-out, box-shadow 180ms ease-out; }
+.soccer-team:hover { transform: translateY(-3px); }
+.soccer-team[aria-pressed="true"] { border-color: var(--team-color); box-shadow: 0 8px 0 color-mix(in srgb, var(--team-color), transparent 80%); }
+.soccer-team--coral { --team-color: var(--coral); }
+.soccer-team--teal { --team-color: var(--teal); }
+.soccer-team__crest { width: 54px; height: 60px; display: grid; place-items: center; position: relative; color: var(--cream); background: var(--team-color); border-radius: 13px 13px 21px 21px; box-shadow: inset 0 -8px 0 rgb(59 8 85 / .16); transform: rotate(-3deg); }
+.soccer-team__crest i { position: absolute; width: 32px; height: 32px; border: 3px solid var(--cream); border-radius: 50%; opacity: .48; }
+.soccer-team__crest b { position: relative; font-size: 24px; }
+.soccer-team__copy small, .soccer-team__copy strong, .soccer-team__copy span { display: block; }
+.soccer-team__copy small { margin-bottom: 3px; color: var(--team-color); font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .1em; }
+.soccer-team__copy strong { font-size: clamp(15px, 1.2vw, 19px); }
+.soccer-team__copy span { margin-top: 5px; color: #735e70; font-size: 11px; line-height: 1.3; }
+.soccer-team__check { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: transparent; background: #eaded1; font-size: 12px; }
+.soccer-team[aria-pressed="true"] .soccer-team__check { color: var(--cream); background: var(--team-color); }
+
+.soccer-setup__options { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.soccer-choice-row, .soccer-size-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.soccer-choice-row button, .soccer-size-row button { min-height: 84px; padding: 10px; border: 2px solid #e0cfbf; border-radius: 16px; color: var(--ink); background: transparent; cursor: pointer; }
+.soccer-choice-row button[aria-pressed="true"], .soccer-size-row button[aria-pressed="true"] { color: var(--cream); border-color: var(--plum); background: var(--plum); }
+.soccer-choice-row strong, .soccer-choice-row span, .soccer-size-row strong, .soccer-size-row span { display: block; }
+.soccer-choice-row strong, .soccer-size-row strong { font-size: 13px; }
+.soccer-choice-row span, .soccer-size-row span { margin-top: 5px; font-size: 10px; opacity: .7; }
+
+.soccer-setup__launch { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; }
+.soccer-setup__ticket { padding-left: 18px; border-left: 3px dashed #d3bdb1; }
+.soccer-setup__ticket span { color: #755f72; font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+.soccer-setup__ticket strong { display: block; margin: 5px 0 3px; font-size: clamp(18px, 1.6vw, 24px); }
+.soccer-setup__ticket p { margin: 0; color: #755f72; font-size: 11px; }
+.soccer-setup__start { width: 100%; min-height: 58px; margin-top: 16px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 17px; color: var(--cream); background: var(--plum); box-shadow: 0 8px 0 #22062f; font: 900 clamp(15px, 1.4vw, 19px)/1 "Trebuchet MS", sans-serif; cursor: pointer; transition: transform 150ms ease-out, box-shadow 150ms ease-out; }
+.soccer-setup__start:hover { transform: translateY(-2px); box-shadow: 0 10px 0 #22062f; }
+.soccer-setup__start:active { transform: translateY(5px); box-shadow: 0 3px 0 #22062f; }
+.soccer-setup__launch > p { margin: 13px 4px 0; color: #765e74; font-size: 10px; line-height: 1.4; }
+
+@keyframes soccer-stadium-enter { from { opacity: 0; transform: translate3d(60px, 20px, 0) rotate(3deg); } to { opacity: 1; transform: none; } }
+@keyframes soccer-player-idle { from { transform: translateY(0) rotate(-1deg); } to { transform: translateY(-7px) rotate(1deg); } }
+@keyframes soccer-ball-idle { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-12px) rotate(18deg); } }
+
+@media (max-width: 1050px) {
+  .soccer-setup__stage { grid-template-columns: .8fr 1.2fr; }
+  .soccer-setup__console { grid-template-columns: 1.2fr .8fr; }
+  .soccer-setup__launch { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr minmax(260px, .65fr); align-items: center; gap: 20px; }
+  .soccer-setup__launch > p { display: none; }
+  .soccer-setup__start { margin: 0; }
+}
+
+@media (max-width: 760px) {
+  .soccer-setup__topbar { min-height: 64px; padding: 9px 14px; grid-template-columns: 1fr auto; }
+  .soccer-setup__league-mark { order: -1; justify-self: start; }
+  .soccer-setup__league-mark > span { width: 38px; height: 38px; }
+  .soccer-setup__league-mark strong { font-size: 13px; }
+  .soccer-setup__back { justify-self: end; padding: 0 14px; }
+  .soccer-setup__player { display: none; }
+  .soccer-setup__stage { width: min(100% - 26px, 620px); margin-top: 10px; display: flex; flex-direction: column; gap: 0; }
+  .soccer-setup__copy { align-self: stretch; padding: 10px 6px 0; }
+  .soccer-setup__copy h1 { font-size: clamp(50px, 15vw, 76px); }
+  .soccer-setup__copy > p:not(.soccer-setup__eyebrow) { margin: 12px 0 4px; font-size: 14px; }
+  .soccer-setup__match-note { display: none; }
+  .soccer-stadium { width: 92%; align-self: flex-end; margin-top: -14px; }
+  .soccer-stadium > p { margin-top: -27px; font-size: 10px; }
+  .soccer-setup__console { width: min(100% - 18px, 620px); margin-top: 20px; padding: 16px; display: block; border-radius: 24px; }
+  .soccer-setup__teams { gap: 8px; }
+  .soccer-team { min-height: 102px; grid-template-columns: auto 1fr; padding: 10px; }
+  .soccer-team__crest { width: 44px; height: 50px; }
+  .soccer-team__copy span, .soccer-team__check { display: none; }
+  .soccer-setup__options { margin-top: 18px; gap: 12px; }
+  .soccer-choice-row button, .soccer-size-row button { min-height: 72px; padding: 8px 4px; }
+  .soccer-setup__launch { display: block; margin-top: 18px; }
+  .soccer-setup__ticket { display: none; }
+  .soccer-setup__start { min-height: 58px; }
+}
+
+@media (max-width: 430px) {
+  .soccer-setup__copy h1 { font-size: 49px; }
+  .soccer-setup__copy > p:not(.soccer-setup__eyebrow) { max-width: 36ch; }
+  .soccer-setup__eyebrow { font-size: 10px; }
+  .soccer-stadium { margin-top: -8px; }
+  .soccer-setup__options { display: block; }
+  .soccer-setup__options fieldset + fieldset { margin-top: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .soccer-stadium, .soccer-stadium__player, .soccer-stadium__ball { animation: none; }
+  .soccer-setup *, .soccer-setup *::before, .soccer-setup *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

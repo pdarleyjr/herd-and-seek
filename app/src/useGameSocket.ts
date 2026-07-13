@@ -14,6 +14,7 @@ export interface UseGameSocketOptions {
   roomId: string | null;
   userId: string;
   username: string;
+  accessToken?: string;
   onMessage: (message: ServerMessage) => void;
   onStatusChange?: (status: ConnectionStatus) => void;
   onProtocolError?: (error: ProtocolDiagnostic) => void;
@@ -30,7 +31,7 @@ function nextBackoff(attempt: number): number {
 }
 
 export function useGameSocket(options: UseGameSocketOptions) {
-  const { enabled, roomId, userId, username, onMessage, onStatusChange, onProtocolError } = options;
+  const { enabled, roomId, userId, username, accessToken, onMessage, onStatusChange, onProtocolError } = options;
 
   const wsRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<ClientMessage[]>([]);
@@ -96,7 +97,7 @@ export function useGameSocket(options: UseGameSocketOptions) {
 
       let ws: WebSocket;
       try {
-        ws = new WebSocket(buildSocketUrl(roomId, userId, username));
+        ws = new WebSocket(buildSocketUrl(roomId, userId, username, accessToken));
       } catch {
         setStatusSafe("failed");
         return;
@@ -165,7 +166,7 @@ export function useGameSocket(options: UseGameSocketOptions) {
       }
       setStatusSafe("idle");
     };
-  }, [enabled, roomId, userId, username, clearReconnect, setStatusSafe]);
+  }, [enabled, roomId, userId, username, accessToken, clearReconnect, setStatusSafe]);
 
   return { send, status };
 }

@@ -10,7 +10,9 @@ export type DistrictId =
   | "grasslands"
   | "wateringHole"
   | "ridgeTrail"
-  | "acaciaGrove";
+  | "acaciaGrove"
+  | "moonfernForest"
+  | "strikerField";
 
 export type QuestId =
   | "daily_scout_tracks"
@@ -125,12 +127,16 @@ export type OpenWorldServerMessage =
   | { type: "COLLECTIBLE_COLLECTED"; payload: { nodeId: string; byUserId: string } }
   | { type: "OPEN_WORLD_ERROR"; payload: { code: string; message: string } };
 
-export const OPEN_WORLD_WORLD_SIZE = 3000;
+// Four times the playable area of the original reserve while retaining a
+// single coordinate space and scene. The server mirrors these bounds.
+export const OPEN_WORLD_WORLD_SIZE = 6000;
 
 export const DISTRICTS: { id: DistrictId; name: string; cx: number; cy: number }[] = [
-  { id: "lodge", name: "Ranger Outpost", cx: 1500, cy: 1500 },
-  { id: "grasslands", name: "Grasslands", cx: 650, cy: 1500 },
-  { id: "wateringHole", name: "Watering Hole", cx: 2300, cy: 2250 },
-  { id: "ridgeTrail", name: "Ridge Trail", cx: 1500, cy: 420 },
-  { id: "acaciaGrove", name: "Acacia Grove", cx: 2300, cy: 820 },
+  { id: "lodge", name: "Ranger Outpost", cx: 3000, cy: 3000 },
+  { id: "grasslands", name: "Sunstep Grasslands", cx: 1300, cy: 3200 },
+  { id: "wateringHole", name: "Tideglass Wetlands", cx: 4750, cy: 4450 },
+  { id: "ridgeTrail", name: "Ember Ridge", cx: 3100, cy: 750 },
+  { id: "acaciaGrove", name: "Acacia Grove", cx: 4750, cy: 1450 },
+  { id: "moonfernForest", name: "Moonfern Forest", cx: 1050, cy: 1050 },
+  { id: "strikerField", name: "Striker Field", cx: 4750, cy: 3000 },
 ];
