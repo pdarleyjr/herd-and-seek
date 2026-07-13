@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  PASSWORD_ITERATIONS,
   RoomDirectoryDurableObject,
   deriveRoomPasswordVerifier,
   type RoomDirectoryRecord,
@@ -36,6 +37,10 @@ async function responseJson<T>(response: Response): Promise<T> {
 }
 
 describe("room password verifier", () => {
+  it("stays within the Cloudflare Workers PBKDF2 iteration ceiling", () => {
+    expect(PASSWORD_ITERATIONS).toBe(100_000);
+  });
+
   it("is deterministic for one salt without retaining the password", async () => {
     const salt = new Uint8Array(16).fill(7);
     const first = await deriveRoomPasswordVerifier("correct horse battery", salt);

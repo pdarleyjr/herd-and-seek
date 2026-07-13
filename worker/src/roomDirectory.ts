@@ -34,7 +34,9 @@ export interface PublicRoomSummary {
 const STORAGE_KEY = "room-directory:v1";
 const ROOM_TTL_MS = 6 * 60 * 60 * 1_000;
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1_000;
-const PASSWORD_ITERATIONS = 120_000;
+// Cloudflare Workers' Web Crypto runtime rejects PBKDF2 iteration counts above
+// 100,000. Keep this exported so the platform ceiling stays regression-tested.
+export const PASSWORD_ITERATIONS = 100_000;
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
