@@ -1,0 +1,5 @@
+{
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "animations": {},
+  "note": "Current repository sprites are single-frame; Phaser scenes add authored idle and walk motion with tweens."
+}

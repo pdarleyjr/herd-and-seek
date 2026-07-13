@@ -1732,7 +1732,7 @@ for (const item of renderArray) {
         cooldownUntil: now + 8000,
       };
     } else if (me.perk === "decoy") {
-      send({ type: "DECOY", payload: {} });
+      send({ type: "ACTIVATE_PERK", payload: { perk: "decoy" } });
       perkStateRef.current = {
         type: "decoy",
         activeUntil: 0,

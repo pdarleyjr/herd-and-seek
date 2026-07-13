@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AdminAuditEntry,
   AdminCommand,
@@ -18,6 +18,7 @@ interface AdminPanelProps {
     extra?: { levelId?: LevelId; duration?: number; targetId?: string },
   ) => void;
   onClearDenied: () => void;
+  revealSignal?: number;
 }
 
 // Hidden admin control plane. Access is a two-stage reveal (gesture surfaces the
@@ -31,11 +32,11 @@ export default function AdminPanel({
   onAuth,
   onCommand,
   onClearDenied,
+  revealSignal = 0,
 }: AdminPanelProps) {
-  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(revealSignal > 0 && !authed);
   const [drawerHidden, setDrawerHidden] = useState(false);
   const [keyInput, setKeyInput] = useState("");
-  const longPressTimer = useRef<number | null>(null);
 
   // Desktop reveal: Ctrl+Shift+A.
   useEffect(() => {
@@ -53,19 +54,6 @@ export default function AdminPanel({
   // shown whenever authenticated and not manually hidden (no effect needed).
   const drawerOpen = authed && !drawerHidden;
 
-  const startLongPress = () => {
-    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = window.setTimeout(() => {
-      setPromptOpen(true);
-    }, 1500);
-  };
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      window.clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-
   const submitAuth = () => {
     if (keyInput.trim()) {
       onClearDenied();
@@ -75,19 +63,6 @@ export default function AdminPanel({
 
   return (
     <>
-      {/* Invisible touch hot-zone (bottom-right). Long-press ~1.5s to reveal. */}
-      {!authed && (
-        <div
-          aria-hidden
-          className="fixed bottom-0 right-0 z-30"
-          style={{ width: 56, height: 56, touchAction: "none" }}
-          onPointerDown={startLongPress}
-          onPointerUp={cancelLongPress}
-          onPointerLeave={cancelLongPress}
-          onPointerCancel={cancelLongPress}
-        />
-      )}
-
       {/* Passphrase prompt */}
       {promptOpen && !authed && (
         <div

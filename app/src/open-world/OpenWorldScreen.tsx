@@ -1,7 +1,9 @@
-import { useState } from "react";
-import OpenWorldCanvas from "./OpenWorldCanvas";
+import { lazy, Suspense, useState } from "react";
 import { useOpenWorldSocket } from "./useOpenWorldSocket";
 import { QUEST_CATALOG } from "./questCatalog";
+import "./openWorldPhaser.css";
+
+const OpenWorldPhaser = lazy(() => import("./OpenWorldPhaser"));
 
 interface OpenWorldScreenProps {
   userId: string;
@@ -26,18 +28,20 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
 
   return (
     <div className="relative w-dvw h-dvh overflow-hidden bg-[#caa869]">
-      <OpenWorldCanvas
-        userId={userId}
-        username={username}
-        animalType={animalType}
-        zoneState={ow.zoneState}
-        profile={profile}
-        questProgress={questProgress}
-        onSync={ow.sync}
-        onCollectNode={ow.collectNode}
-        onAcceptQuest={ow.acceptQuest}
-        onClaimQuest={ow.claimQuest}
-      />
+      <Suspense fallback={<div className="absolute inset-0 grid place-items-center bg-[#9f793d] text-[#fff2bd] font-bold">Opening the reserve…</div>}>
+        <OpenWorldPhaser
+          userId={userId}
+          username={username}
+          animalType={animalType}
+          zoneState={ow.zoneState}
+          profile={profile}
+          questProgress={questProgress}
+          onSync={ow.sync}
+          onCollectNode={ow.collectNode}
+          onAcceptQuest={ow.acceptQuest}
+          onClaimQuest={ow.claimQuest}
+        />
+      </Suspense>
 
       {/* ── Top HUD: Leave | active quest | profile ── */}
       <div

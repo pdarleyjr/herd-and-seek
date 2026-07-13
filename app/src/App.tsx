@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { loadAssetsForLevel, preloadAssetsForLevel, type AssetMap } from "./AssetLoader";
 import GameCanvas from "./GameCanvas";
+import { resolveRendererMode } from "./game-engine/rendererMode";
+import GameHud from "./game-engine/GameHud";
 import HomeScreen from "./components/home/HomeScreen";
-import ProfileBar from "./components/economy/ProfileBar";
 import ShopModal from "./components/economy/ShopModal";
 import AdminPanel from "./components/admin/AdminPanel";
 import OpenWorldScreen from "./open-world/OpenWorldScreen";
@@ -11,7 +12,6 @@ import ModeSelect from "./components/ModeSelect";
 import RoomBrowser from "./components/RoomBrowser";
 import SoloSetup from "./components/SoloSetup";
 import { useGameSocket } from "./useGameSocket";
-import { useViewportInfo } from "./hooks/useViewportInfo";
 import { useProfile } from "./hooks/useProfile";
 import {
   type SerializedState,
@@ -22,6 +22,8 @@ import {
   type AdminAuditEntry,
   type AdminCommand,
   type ConnectionStatus,
+  type SoloDifficulty,
+  type DecoySpawnPayload,
   isAnimalAllowed,
   defaultAnimalForLevel,
 } from "./types";
@@ -47,6 +49,9 @@ type AppRoute =
   | { type: "SOLO_PLAYING"; roomId: string }
   | { type: "OPEN_WORLD"; zoneId: "savannahReserve" };
 
+const GAME_RENDERER = resolveRendererMode(import.meta.env.VITE_GAME_RENDERER);
+const PhaserGame = lazy(() => import("./game-engine/PhaserGame"));
+
 function readSavedSession() {
   if (typeof window === "undefined") return { userId: "", username: "" };
   return {
@@ -55,9 +60,10 @@ function readSavedSession() {
   };
 }
 
-function useFps(): number {
+function useFps(enabled: boolean): number {
   const [fps, setFps] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     let raf = 0;
     let frames = 0;
     let last = performance.now();
@@ -73,7 +79,7 @@ function useFps(): number {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [enabled]);
   return fps;
 }
 
@@ -100,16 +106,24 @@ export default function App() {
   const [selectedLevel, setSelectedLevel] = useState<LevelId>("forest");
   const [selectedPerk, setSelectedPerk] = useState<PerkType>("none");
   const [endCountdown, setEndCountdown] = useState<number | null>(null);
-  const viewport = useViewportInfo();
+  const [decoySpawn, setDecoySpawn] = useState<(DecoySpawnPayload & { receivedAt: number }) | null>(null);
   const localPosRef = useRef({ x: 100, y: 100 });
-  const fps = useFps();
+  const debugMode = isDebug();
+  const fps = useFps(debugMode);
 
   const { profile, setProfile, refresh: refreshProfile } = useProfile(userId, username);
   const [showShop, setShowShop] = useState(false);
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [adminDenied, setAdminDenied] = useState(false);
   const [adminAuditLog, setAdminAuditLog] = useState<AdminAuditEntry[]>([]);
+  const [adminRevealSignal, setAdminRevealSignal] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
+  const pendingSoloStartRef = useRef<{ role: "hunter" | "animal" | "random"; botCount: number; level: LevelId; animal: AnimalType; perk: PerkType; duration: number; difficulty: SoloDifficulty } | null>(null);
+
+  useEffect(() => {
+    if (!navigator.userAgent.toLowerCase().includes("jsdom")) window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector<HTMLElement>(".mode-camp, .solo-camp")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [route.type]);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,9 +135,9 @@ export default function App() {
     if (selectedLevel) preloadAssetsForLevel(selectedLevel);
   }, [selectedLevel]);
 
-  const handleAuth = useCallback(() => {
+  const handleAuth = useCallback((submittedName?: string) => {
     soundManager.unlock();
-    const name = (document.getElementById("home-player-name") as HTMLInputElement | null)?.value?.trim();
+    const name = (submittedName ?? username).trim();
     if (!name) return;
     const id = sessionStorage.getItem("hs_sessionId") || crypto.randomUUID();
     sessionStorage.setItem("hs_sessionId", id);
@@ -131,7 +145,7 @@ export default function App() {
     setUserId(id);
     setUsername(name);
     setRoute({ type: "MODE_SELECT" });
-  }, []);
+  }, [username]);
 
   const onEvent = useCallback((msg: string) => {
     setEventLog((prev) => [msg, ...prev].slice(0, 8));
@@ -148,6 +162,7 @@ export default function App() {
           setSelectedLevel(state.levelId ?? "forest");
           const me = state.players.find((p) => p.id === userId);
           if (me) {
+            setSelectedPerk(me.perk);
             setSelectedAnimal((prev) => {
               const lvl = state.levelId ?? "forest";
               if (!isAnimalAllowed(prev, lvl)) return me.animalType;
@@ -155,6 +170,7 @@ export default function App() {
             });
           }
           if (data.type === "MATCH_START") {
+            soundManager.gameStart();
             const meLocal = state.players.find((p) => p.id === userId);
             if (meLocal) localPosRef.current = { x: meLocal.x, y: meLocal.y };
             setRoute({ type: "MATCH_PLAYING", roomId: session?.roomId ?? state.players[0]?.id ?? "" });
@@ -195,6 +211,9 @@ export default function App() {
           void refreshProfile();
           break;
         }
+        case "DECOY_SPAWN":
+          setDecoySpawn({ ...data.payload, receivedAt: Date.now() });
+          break;
         case "ADMIN_OK":
           setAdminAuthed(true); setAdminDenied(false); setAdminAuditLog(data.payload.auditLog ?? []); break;
         case "ADMIN_DENIED":
@@ -266,11 +285,30 @@ export default function App() {
     const s: SessionRef = { roomId: soloRoomId(userId), mode: "solo", hostUserId: userId, createdAt: Date.now() };
     saveSession(s); setSession(s); setRoute({ type: "SOLO_SETUP" });
   }, [userId]);
-  const startSolo = useCallback((role: "hunter" | "animal" | "random", botCount: number, level: LevelId) => {
-    setSelectedLevel(level);
-    send({ type: "SELECT_LEVEL", payload: { levelId: level } });
-    send({ type: "START_SOLO", payload: { role, botCount } });
-  }, [send]);
+  const startSolo = useCallback((settings: { role: "hunter" | "animal" | "random"; botCount: number; level: LevelId; animal: AnimalType; perk: PerkType; duration: number; difficulty: SoloDifficulty }) => {
+    const { role, botCount, level, animal, perk, duration, difficulty } = settings;
+    setSelectedLevel(level); setSelectedAnimal(animal); setSelectedPerk(perk);
+    if (status === "connected") {
+      send({ type: "SELECT_LEVEL", payload: { levelId: level } });
+      send({ type: "SELECT_ANIMAL", payload: { animalType: animal } });
+      send({ type: "SELECT_PERK", payload: { perk } });
+      send({ type: "SET_DURATION", payload: { duration } });
+      send({ type: "START_SOLO", payload: { role, botCount, difficulty } });
+    } else {
+      pendingSoloStartRef.current = settings;
+    }
+  }, [send, status]);
+
+  useEffect(() => {
+    if (status !== "connected" || !pendingSoloStartRef.current) return;
+    const pending = pendingSoloStartRef.current;
+    pendingSoloStartRef.current = null;
+    send({ type: "SELECT_LEVEL", payload: { levelId: pending.level } });
+    send({ type: "SELECT_ANIMAL", payload: { animalType: pending.animal } });
+    send({ type: "SELECT_PERK", payload: { perk: pending.perk } });
+    send({ type: "SET_DURATION", payload: { duration: pending.duration } });
+    send({ type: "START_SOLO", payload: { role: pending.role, botCount: pending.botCount, difficulty: pending.difficulty } });
+  }, [send, status]);
   const leaveRoom = useCallback(() => {
     send({ type: "LEAVE_ROOM" });
     clearSession(); setSession(null); setRoute({ type: "MODE_SELECT" });
@@ -323,21 +361,21 @@ export default function App() {
             setSelectedAnimal((prev) => (isAnimalAllowed(prev, lvl) ? prev : defaultAnimalForLevel(lvl)));
             send({ type: "SELECT_LEVEL", payload: { levelId: lvl } });
           }}
-          onReady={() => send({ type: "READY" })}
+          onSetDuration={(duration) => send({ type: "SET_DURATION", payload: { duration } })}
+          onReady={(isReady) => send({ type: "READY", payload: { isReady } })}
           onCopyCode={() => {}}
           onLeave={leaveRoom}
           onCloseRoom={closeRoom}
           onOpenWorld={goOpenWorld}
+          onOpenShop={() => setShowShop(true)}
+          onOpenAdmin={() => setAdminRevealSignal((value) => value + 1)}
         />
-        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-30">
-          <ProfileBar profile={profile} onOpenShop={() => setShowShop(true)} />
-        </div>
         {showShop && (
           <ShopModal userId={userId} username={username} profile={profile} onProfileChange={setProfile} onClose={() => setShowShop(false)} />
         )}
-        <AdminPanel authed={adminAuthed} denied={adminDenied} auditLog={adminAuditLog} gameState={gameState}
-          onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} />
-        {isDebug() && <Diagnostics route={route} roomId={session.roomId} status={status} userId={userId}
+        <AdminPanel key={adminRevealSignal} authed={adminAuthed} denied={adminDenied} auditLog={adminAuditLog} gameState={gameState}
+          onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} revealSignal={adminRevealSignal} />
+        {debugMode && <Diagnostics route={route} roomId={session.roomId} status={status} userId={userId}
           playerCount={gameState?.players.length ?? 0} phase={gameState?.phase ?? "—"} fps={fps} />}
       </>
     );
@@ -346,81 +384,37 @@ export default function App() {
   // GAME (multiplayer + solo)
   const me = gameState?.players.find((p) => p.id === userId);
   const isHunter = me?.isHunter ?? false;
-  const isPhoneLayout = viewport.layoutMode.startsWith("phone");
   const gameplayAssets = assets ?? ({} as AssetMap);
   const showCountdown = gameState?.phase === "COUNTDOWN";
 
   return (
     <div className="relative w-dvw h-dvh overflow-hidden bg-green-900" style={{ touchAction: "manipulation" }}>
-      <GameCanvas assets={gameplayAssets} userId={userId} username={username} gameState={gameState} localPosRef={localPosRef} send={send} />
+      {GAME_RENDERER === "legacy" ? (
+        <GameCanvas assets={gameplayAssets} userId={userId} username={username} gameState={gameState} localPosRef={localPosRef} send={send} />
+      ) : (
+        <Suspense fallback={<div className="absolute inset-0 grid place-items-center bg-[#173d2b] text-[#fff1bd] font-bold">Packing the reserve…</div>}>
+          <PhaserGame
+            userId={userId}
+            username={username}
+            gameState={gameState}
+            localPosRef={localPosRef}
+            send={send}
+            selectedAnimal={selectedAnimal}
+            selectedLevel={selectedLevel}
+            selectedPerk={selectedPerk}
+            decoySpawn={decoySpawn}
+          />
+        </Suspense>
+      )}
 
       {showCountdown && <CountdownOverlay endsAt={gameState?.countdownEndsAt ?? null} />}
 
       {gameState?.phase === "PLAYING" && (
         <>
-          <div className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xl sm:text-2xl font-bold tabular-nums">
-            ⏱ {formatTime(gameState.timeRemaining)}
-          </div>
-          {isPhoneLayout ? (
-            <>
-              <div className="absolute left-3 sm:left-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg max-w-[140px] sm:max-w-xs max-h-32 overflow-hidden space-y-1"
-                style={{ bottom: "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))" }}>
-                <h3 className="text-xs sm:text-sm font-bold text-green-300">Events</h3>
-                {eventLog.length === 0 && <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>}
-                {eventLog.slice(0, 3).map((e, i) => <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>)}
-              </div>
-              {isHunter ? (
-                <div className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-lg"
-                  style={{ bottom: "max(8.75rem, calc(env(safe-area-inset-bottom, 0px) + 16px))" }}>
-                  <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
-                  <div className="flex gap-1 flex-wrap max-w-[100px] sm:max-w-[120px]">
-                    {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
-                      <span key={i} className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}>🔫</span>
-                    ))}
-                  </div>
-                  <p className="text-[10px] sm:text-xs text-gray-300 mt-1">{gameState.ammo}/{gameState.maxAmmo}</p>
-                </div>
-              ) : (
-                <div className="absolute right-3 sm:right-4 z-10 bg-black/70 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm"
-                  style={{ bottom: "max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 12px))" }}>
-                  <p>Role: <span className="text-green-400">Animal</span></p>
-                  <p className="text-[10px] sm:text-xs text-gray-300">Survive! Move to blend in.</p>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <details className="absolute left-4 z-10 bg-black/70 text-white rounded-lg max-w-[280px] w-[clamp(220px,22vw,320px)]" style={{ top: "4.25rem" }} open>
-                <summary className="cursor-pointer list-none px-4 py-2 text-xs sm:text-sm font-bold text-green-300 select-none">Events</summary>
-                <div className="px-4 pb-3 space-y-1 max-h-40 overflow-hidden">
-                  {eventLog.length === 0 && <p className="text-[10px] sm:text-xs text-gray-400">No events yet...</p>}
-                  {eventLog.slice(0, 4).map((e, i) => <p key={i} className="text-[10px] sm:text-xs leading-tight">{e}</p>)}
-                </div>
-              </details>
-              <div className="absolute right-4 z-10 bg-black/70 text-white px-4 py-3 rounded-lg" style={{ top: "4.25rem" }}>
-                {isHunter ? (
-                  <>
-                    <h3 className="text-xs sm:text-sm font-bold text-red-400 mb-1">Ammo</h3>
-                    <div className="flex gap-1 flex-wrap max-w-[120px]">
-                      {Array.from({ length: gameState.maxAmmo }).map((_, i) => (
-                        <span key={i} className={`text-sm sm:text-lg ${i < gameState.ammo ? "opacity-100" : "opacity-20"}`}>🔫</span>
-                      ))}
-                    </div>
-                    <p className="text-[10px] sm:text-xs text-gray-300 mt-1">{gameState.ammo}/{gameState.maxAmmo}</p>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="text-xs sm:text-sm font-bold text-green-300 mb-1">Role</h3>
-                    <p><span className="text-green-400 font-bold">Animal</span></p>
-                    <p className="text-[10px] sm:text-xs text-gray-300">Survive! Move to blend in.</p>
-                  </>
-                )}
-              </div>
-            </>
-          )}
+          <GameHud state={gameState} player={me} eventLog={eventLog} connection={status} />
           {!me?.isAlive && !isHunter && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-black/80 text-white px-6 sm:px-8 py-4 rounded-xl text-xl sm:text-2xl font-bold text-center">
-              💀 You were neutralized!
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-[#14271fe8] border-2 border-[#d9b45d] text-[#fff3cb] px-6 sm:px-8 py-4 rounded-xl text-xl sm:text-2xl font-bold text-center">
+              Your trail ends here
             </div>
           )}
         </>
@@ -452,15 +446,9 @@ export default function App() {
   );
 }
 
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
-}
-
 function isDebug(): boolean {
   if (typeof window === "undefined") return false;
-  return import.meta.env.DEV || new URLSearchParams(window.location.search).has("debug");
+  return new URLSearchParams(window.location.search).has("debug");
 }
 
 function CountdownOverlay({ endsAt }: { endsAt: number | null }) {

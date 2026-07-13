@@ -11,7 +11,9 @@ import {
   writeCachedProfile,
 } from "./storage/profileCache";
 
-const API_BASE = "https://herd-and-seek-backend.pdarleyjr.workers.dev/api/profile";
+import { BACKEND_ORIGIN } from "./backend";
+
+const API_BASE = `${BACKEND_ORIGIN}/api/profile`;
 
 export { readCachedProfile, writeCachedProfile };
 

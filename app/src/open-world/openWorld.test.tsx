@@ -30,7 +30,7 @@ describe("open-world controls", () => {
     expect(v.magnitude).toBe(0);
   });
 
-  it("resolveContextAction prioritizes a nearby collectible", () => {
+  it("resolveContextAction establishes a lodge quest before nearby collectibles", () => {
     const zone = makeZone({
       collectibles: [{ id: "n1", x: LODGE.cx + 10, y: LODGE.cy + 10, kind: "coin", value: 5 }],
     });
@@ -39,6 +39,18 @@ describe("open-world controls", () => {
       localX: LODGE.cx,
       localY: LODGE.cy,
       questProgress: {},
+      lodge: { x: LODGE.cx, y: LODGE.cy },
+    });
+    expect(action?.kind).toBe("accept");
+  });
+
+  it("resolveContextAction prioritizes a nearby collectible once a quest is active", () => {
+    const zone = makeZone({ collectibles: [{ id: "n1", x: LODGE.cx + 10, y: LODGE.cy + 10, kind: "coin", value: 5 }] });
+    const action = resolveContextAction({
+      zone,
+      localX: LODGE.cx,
+      localY: LODGE.cy,
+      questProgress: { repeat_gather_food: { questId: "repeat_gather_food", status: "active", progress: 0, targetCount: 5 } },
       lodge: { x: LODGE.cx, y: LODGE.cy },
     });
     expect(action?.kind).toBe("collect");

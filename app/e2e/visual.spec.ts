@@ -1,109 +1,96 @@
-import { test, expect, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Page } from "@playwright/test";
 
-// ── Geometry helpers ─────────────────────────────────────────────────────────
-interface Rect { x: number; y: number; width: number; height: number; right: number; bottom: number; }
-
-function intersects(a: Rect, b: Rect, slack = 1): boolean {
-  return !(a.right - slack <= b.x || b.right - slack <= a.x || a.bottom - slack <= b.y || b.bottom - slack <= a.y);
-}
-
-// Portrait / mobile viewports render the compact PortraitLobby, not the desktop grid.
-function isCompactProject(name: string): boolean {
-  return /portrait|mobile/.test(name);
-}
-
-async function box(page: Page, selector: string): Promise<Rect | null> {
-  const el = page.locator(selector).last();
-  if ((await el.count()) === 0) return null;
-  const b = await el.boundingBox();
-  if (!b) return null;
-  return { ...b, right: b.x + b.width, bottom: b.y + b.height };
+async function authenticate(page: Page, name = "TrailTester") {
+  await page.goto("/");
+  await page.getByLabel(/Player name/i).fill(name);
+  await page.getByRole("button", { name: /^PLAY$/i }).click();
+  await expect(page.getByRole("button", { name: /Multiplayer/i })).toBeVisible();
 }
 
 async function enterLobby(page: Page) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.fill("#home-player-name", "SmokeTester");
-  await page.click('button[type="submit"]');
-  await expect(page.getByText("Open World")).toBeVisible({ timeout: 45000 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await authenticate(page, `Trail-${Date.now()}`);
+  await page.getByRole("button", { name: /Multiplayer/i }).click();
+  await page.getByRole("button", { name: /Create a Room/i }).click();
+  await expect(page.getByRole("button", { name: /Copy room code/i })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-scene="preview"] canvas')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('[data-scene="preview"]')).toHaveAttribute("data-engine-ready", "LobbyPreviewScene", { timeout: 15_000 });
+  await expect(page.locator(".lobby-v2")).toHaveAttribute("data-connection", "connected", { timeout: 15_000 });
 }
 
-const READY_SEL = 'button:has-text("Ready Up"), button:has-text("Waiting for Players"), button:has-text("Waiting ("), button:has-text("Start Match")';
-
-// ── Lobby structure + no-overlap ──────────────────────────────────────────────
-test.describe("lobby layout", () => {
-  test.beforeEach(async ({ page }) => {
-    await enterLobby(page);
+test.describe("core navigation surfaces", () => {
+  test("captures the home screen", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: /^PLAY$/i })).toBeVisible();
+    await expect(page).toHaveScreenshot("home.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
   });
 
-  test("renders all three map cards without an orphaned third card", async ({ page }) => {
-    for (const name of ["Forest", "The Deep Dark", "Savannah at Dusk"]) {
-      await expect(page.getByRole("button", { name, exact: false })).toBeVisible();
+  test("captures the authored mode desk", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await authenticate(page, "ModeTester");
+    await expect(page.getByRole("heading", { name: /Where will your trail begin/i })).toBeVisible();
+    await expect(page).toHaveScreenshot("mode-select.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
+  });
+
+  test("captures solo field planning", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await authenticate(page, "SoloPlanner");
+    await page.getByRole("button", { name: /Solo vs AI/i }).click();
+    await expect(page.getByRole("heading", { name: /Solo field plan/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Back$/i })).toBeInViewport();
+    await expect(page.getByRole("button", { name: /Start solo expedition/i })).toBeInViewport();
+    await expect(page).toHaveScreenshot("solo-setup.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
+  });
+
+  test("keeps primary mode controls available at browser zoom levels", async ({ page }) => {
+    await authenticate(page, "ZoomTester");
+    for (const zoom of [1.25, 1.5, 2]) {
+      await page.evaluate((value) => { document.documentElement.style.zoom = String(value); }, zoom);
+      await expect(page.getByRole("button", { name: /Multiplayer/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Solo vs AI/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Open World/i })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(2);
     }
-  });
-
-  test("shows Morphs, Upgrades, Open World, and Ready controls", async ({ page }) => {
-    await expect(page.getByText("Morphs", { exact: false }).first()).toBeVisible();
-    await expect(page.getByText("Upgrades", { exact: false }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /Open World/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Ready Up|Waiting|Start Match|Ready —/i })).toBeVisible();
-  });
-
-  test("no unexpected horizontal overflow", async ({ page }) => {
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(2);
-  });
-
-  test("footer primary controls do not overlap each other", async ({ page }, testInfo) => {
-    test.skip(isCompactProject(testInfo.project.name), "desktop grid footer only");
-    // Let entrance transitions settle before measuring geometry.
-    await page.waitForTimeout(400);
-    const ready = await box(page, READY_SEL);
-    const openWorld = await box(page, 'button:has-text("Open World")');
-    const solo = await box(page, 'button:has-text("Solo vs AI")');
-    expect(ready).not.toBeNull();
-    expect(openWorld).not.toBeNull();
-    // Open World and Solo buttons must not overlap.
-    if (solo) expect(intersects(openWorld!, solo)).toBe(false);
-    // Ready and Open World must not overlap.
-    expect(intersects(ready!, openWorld!)).toBe(false);
-  });
-
-  test("Open World entry shows the Savannah Reserve HUD", async ({ page }) => {
-    await page.getByRole("button", { name: /Open World/i }).click();
-    await expect(page.getByRole("button", { name: /Leave/i })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/Savannah Reserve/i)).toBeVisible();
   });
 });
 
-// ── Open-world HUD no-overlap ─────────────────────────────────────────────────
-test.describe("open-world HUD", () => {
-  test.beforeEach(async ({ page }) => {
-    await enterLobby(page);
-    await page.getByRole("button", { name: /Open World/i }).click();
-    await expect(page.getByRole("button", { name: /Leave/i })).toBeVisible({ timeout: 10000 });
+test.describe("responsive lobby", () => {
+  test.beforeEach(async ({ page }) => enterLobby(page));
+
+  test("shows authored map, animal, perk, roster, and dominant ready regions", async ({ page }) => {
+    if (!(await page.getByRole("heading", { name: /Choose the terrain/i }).isVisible())) await page.getByRole("button", { name: /^Map$/i }).click();
+    await expect(page.getByRole("heading", { name: /Choose the terrain/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Forest/i })).toBeVisible();
+    if (!(await page.getByRole("heading", { name: /Choose one advantage/i }).isVisible())) await page.getByRole("button", { name: /^Perk$/i }).click();
+    await expect(page.getByRole("heading", { name: /Choose one advantage/i })).toBeVisible();
+    if (!(await page.getByRole("button", { name: /Rabbit/i }).isVisible())) await page.getByRole("button", { name: /^Animal$/i }).click();
+    await expect(page.getByRole("button", { name: /Ready for the trail/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Admin$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Rabbit/i })).toBeVisible();
   });
 
-  test("top HUD zones (leave / quest / profile) do not overlap", async ({ page }) => {
-    const leave = await box(page, 'button:has-text("Leave")');
-    const profile = await box(page, 'div:has-text("Lv")');
-    expect(leave).not.toBeNull();
-    // Leave must stay clear of the right-edge profile summary.
-    if (profile) {
-      expect(leave!.x).toBeLessThan(profile.x);
-    }
-    // Everything stays inside the viewport.
-    const vw = page.viewportSize()!.width;
-    const vh = page.viewportSize()!.height;
-    for (const r of [leave, profile].filter(Boolean) as Rect[]) {
-      expect(r!.x).toBeGreaterThanOrEqual(-1);
-      expect(r!.right).toBeLessThanOrEqual(vw + 1);
-      expect(r!.bottom).toBeLessThanOrEqual(vh + 1);
-    }
+  test("has no horizontal overflow and keeps visible buttons at least 44px", async ({ page }) => {
+    const metrics = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      shortButtons: [...document.querySelectorAll("button")].filter((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && (rect.width < 44 || rect.height < 44);
+      }).map((button) => ({ text: button.textContent?.trim(), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })),
+    }));
+    expect(metrics.overflow).toBeLessThanOrEqual(2);
+    expect(metrics.shortButtons).toEqual([]);
   });
 
-  test("connection or error feedback is surfaced", async ({ page }) => {
-    // Either a connecting/loading state or a profile level is present.
-    const signal = page.getByText(/Connecting|Offline|Lv|Loading profile/i);
-    await expect(signal.first()).toBeVisible({ timeout: 10000 });
+  test("captures the reviewed lobby", async ({ page }) => {
+    await page.getByRole("button", { name: /^Rabbit$/i }).click();
+    await expect(page.locator(".lobby-v2")).toHaveAttribute("data-player-animal", "rabbit");
+    await expect(page).toHaveScreenshot("multiplayer-lobby-admin.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
   });
+});
+
+test("React UI has no serious or critical axe violations", async ({ page }) => {
+  await authenticate(page, "A11yTester");
+  const results = await new AxeBuilder({ page }).exclude("canvas").analyze();
+  expect(results.violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import type { ClientMessage, ServerMessage, ConnectionStatus } from "./types";
 import { buildSocketUrl } from "./room";
+import { parseServerFrame } from "./game-engine/systems/NetworkAdapter";
 
 export interface ProtocolDiagnostic {
   code: string;
@@ -32,6 +33,7 @@ export function useGameSocket(options: UseGameSocketOptions) {
   const { enabled, roomId, userId, username, onMessage, onStatusChange, onProtocolError } = options;
 
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingMessagesRef = useRef<ClientMessage[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
 
   const onMessageRef = useRef(onMessage);
@@ -61,7 +63,10 @@ export function useGameSocket(options: UseGameSocketOptions) {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
+      return;
     }
+    if (msg.type === "LEAVE_ROOM" || msg.type === "CLOSE_ROOM") return;
+    pendingMessagesRef.current = [...pendingMessagesRef.current.slice(-48), msg];
   }, []);
 
   const clearReconnect = useCallback(() => {
@@ -102,17 +107,17 @@ export function useGameSocket(options: UseGameSocketOptions) {
         if (generation !== connectionGenerationRef.current) return;
         attemptRef.current = 0;
         setStatusSafe("connected");
+        const pending = pendingMessagesRef.current.splice(0);
+        for (const message of pending) ws.send(JSON.stringify(message));
       };
 
       ws.onmessage = (event) => {
-        let data: ServerMessage;
-        try {
-          data = JSON.parse(event.data as string) as ServerMessage;
-        } catch {
-          onProtocolErrorRef.current?.({ code: "malformed_frame", detail: "Failed to parse server message", timestamp: Date.now() });
+        const result = parseServerFrame(event.data);
+        if (!result.ok) {
+          onProtocolErrorRef.current?.({ code: result.code, detail: "Server message failed runtime validation", timestamp: Date.now() });
           return;
         }
-        onMessageRef.current(data);
+        onMessageRef.current(result.message);
       };
 
       ws.onerror = () => {
@@ -149,6 +154,7 @@ export function useGameSocket(options: UseGameSocketOptions) {
       intentionalCloseRef.current = true;
       connectionGenerationRef.current += 1;
       clearReconnect();
+      pendingMessagesRef.current = [];
       if (wsRef.current) {
         try {
           wsRef.current.close(1000, "client_leave");

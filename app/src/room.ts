@@ -1,4 +1,5 @@
 import type { MatchMode } from "./types";
+import { BACKEND_WS_ORIGIN } from "./backend";
 
 // Human-readable room codes like "ABCD-EFGH". Ambiguous characters
 // (0/O, 1/I) are excluded to avoid misreads when sharing an invite.
@@ -65,7 +66,6 @@ export function soloRoomId(userId: string): string {
 }
 
 export function buildSocketUrl(roomId: string, userId: string, username: string): string {
-  const base = "wss://herd-and-seek-backend.pdarleyjr.workers.dev";
   const qs = new URLSearchParams({ room: roomId, userId, username });
-  return `${base}?${qs.toString()}`;
+  return `${BACKEND_WS_ORIGIN}?${qs.toString()}`;
 }

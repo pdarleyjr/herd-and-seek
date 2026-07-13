@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "dev:e2e": "wrangler dev --port 8787 --var INTERNAL_REWARD_SECRET:local-e2e-only --var ADMIN_KEY:local-e2e-admin",
+    "build": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",

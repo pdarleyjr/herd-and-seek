@@ -20,6 +20,10 @@ const MANIFEST_OUT = join(ROOT, "src", "generated", "assetAtlasManifest.ts");
 
 const MAX_DIM = 2048;
 const PADDING = 2;
+const EXTRUDE = 1;
+const DETERMINISTIC_DATE = process.env.SOURCE_DATE_EPOCH
+  ? new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString()
+  : "1970-01-01T00:00:00.000Z";
 const CHECK_ONLY = process.argv.includes("--check");
 const ALLOW_LARGER = process.argv.includes("--allow-larger");
 
@@ -75,6 +79,19 @@ async function buildAtlas(sprites, placed, atlasW, atlasH, scale, format) {
       input = await sharp(src.buf).resize(p.w, p.h, { kernel: "lanczos3" }).toBuffer();
     }
     composites.push({ input, left: p.x, top: p.y });
+    const image = sharp(input);
+    const [left, right, top, bottom] = await Promise.all([
+      image.clone().extract({ left: 0, top: 0, width: 1, height: p.h }).toBuffer(),
+      image.clone().extract({ left: p.w - 1, top: 0, width: 1, height: p.h }).toBuffer(),
+      image.clone().extract({ left: 0, top: 0, width: p.w, height: 1 }).toBuffer(),
+      image.clone().extract({ left: 0, top: p.h - 1, width: p.w, height: 1 }).toBuffer(),
+    ]);
+    composites.push(
+      { input: await sharp(left).resize(EXTRUDE, p.h, { kernel: "nearest" }).toBuffer(), left: p.x - EXTRUDE, top: p.y },
+      { input: await sharp(right).resize(EXTRUDE, p.h, { kernel: "nearest" }).toBuffer(), left: p.x + p.w, top: p.y },
+      { input: await sharp(top).resize(p.w, EXTRUDE, { kernel: "nearest" }).toBuffer(), left: p.x, top: p.y - EXTRUDE },
+      { input: await sharp(bottom).resize(p.w, EXTRUDE, { kernel: "nearest" }).toBuffer(), left: p.x, top: p.y + p.h },
+    );
   }
   base = base.composite(composites);
   const buf =
@@ -82,6 +99,32 @@ async function buildAtlas(sprites, placed, atlasW, atlasH, scale, format) {
       ? await base.webp({ quality: 90 }).toBuffer()
       : await base.png({ compressionLevel: 9 }).toBuffer();
   return buf;
+}
+
+function phaserAtlas(placed, image, atlasW, atlasH, scale) {
+  const frames = {};
+  for (const p of placed) {
+    frames[p.key] = {
+      frame: { x: p.x, y: p.y, w: p.w, h: p.h },
+      rotated: false,
+      trimmed: false,
+      spriteSourceSize: { x: 0, y: 0, w: p.w, h: p.h },
+      sourceSize: { w: p.w, h: p.h },
+      pivot: { x: 0.5, y: 0.5 },
+    };
+  }
+  return {
+    frames,
+    meta: {
+      app: "Herd & Seek deterministic atlas builder",
+      version: "1.0",
+      image,
+      format: "RGBA8888",
+      size: { w: atlasW, h: atlasH },
+      scale: String(scale),
+      smartupdate: "$HerdAndSeek:v1$",
+    },
+  };
 }
 
 function manifestEntry(placed, atlasId, scale) {
@@ -118,8 +161,13 @@ async function main() {
   const existingPng1 = join(OUT_DIR, "forest@1x.png");
   const existingWebp2 = join(OUT_DIR, "forest@2x.webp");
   const existingPng2 = join(OUT_DIR, "forest@2x.png");
+  const phaserJson1 = join(OUT_DIR, "forest@1x.json");
+  const phaserJson2 = join(OUT_DIR, "forest@2x.json");
+  const missingReport = join(OUT_DIR, "missing-frame-report.json");
+  const licenseReport = join(OUT_DIR, "license-report.json");
+  const animationReport = join(OUT_DIR, "animated-sprite-metadata.json");
   const haveOutputs =
-    [existingWebp1, existingPng1, existingWebp2, existingPng2].every((f) => {
+    [existingWebp1, existingPng1, existingWebp2, existingPng2, phaserJson1, phaserJson2, missingReport, licenseReport, animationReport].every((f) => {
       try { return statSync(f).size > 0; } catch { return false; }
     });
 
@@ -135,6 +183,8 @@ async function main() {
     writeFileSync(existingPng1, png1);
     writeFileSync(existingWebp2, webp2);
     writeFileSync(existingPng2, png2);
+    writeFileSync(phaserJson1, JSON.stringify(phaserAtlas(pack1.placed, "forest@1x.webp", pack1.atlasW, pack1.atlasH, 1), null, 2));
+    writeFileSync(phaserJson2, JSON.stringify(phaserAtlas(pack2.placed, "forest@2x.webp", pack2.atlasW, pack2.atlasH, 2), null, 2));
     console.log(`✓ wrote atlases (1x ${pack1.atlasW}x${pack1.atlasH}, 2x ${pack2.atlasW}x${pack2.atlasH})`);
   }
 
@@ -143,7 +193,7 @@ async function main() {
 
   const manifest = {
     version: 1,
-    generatedAt: new Date().toISOString(),
+    generatedAt: DETERMINISTIC_DATE,
     atlases: [
       { id: "forest@1x", biome: "forest", scale: 1, webpUrl: "/generated-assets/atlas/forest@1x.webp", pngUrl: "/generated-assets/atlas/forest@1x.png", width: pack1.atlasW, height: pack1.atlasH },
       { id: "forest@2x", biome: "forest", scale: 2, webpUrl: "/generated-assets/atlas/forest@2x.webp", pngUrl: "/generated-assets/atlas/forest@2x.png", width: pack2.atlasW, height: pack2.atlasH },
@@ -204,9 +254,14 @@ export const ATLAS_FRAMES_2X: Record<string, AtlasFrame> = ${JSON.stringify(fram
     atlas2xWebpBytes: statSync(existingWebp2).size,
     atlasCount: sprites.length,
     webpSavingsPct: Math.round((1 - webpBytes / originalBytes) * 100),
-    generatedAt: new Date().toISOString(),
+    generatedAt: DETERMINISTIC_DATE,
   };
   writeFileSync(join(OUT_DIR, "asset-size-report.json"), JSON.stringify(report, null, 2));
+
+  const missing = sprites.filter((s) => !frames1[s.key]);
+  writeFileSync(missingReport, JSON.stringify({ generatedAt: DETERMINISTIC_DATE, missingFrames: missing.map((item) => item.key), duplicateFrames: [] }, null, 2));
+  writeFileSync(licenseReport, JSON.stringify({ generatedAt: DETERMINISTIC_DATE, sources: [{ path: "assets-src/sprites/forest", owner: "Herd & Seek repository", license: "Project-owned", modifications: "Packed, WebP-compressed, one-pixel edge extrusion" }] }, null, 2));
+  writeFileSync(animationReport, JSON.stringify({ generatedAt: DETERMINISTIC_DATE, animations: {}, note: "Current repository sprites are single-frame; Phaser scenes add authored idle and walk motion with tweens." }, null, 2));
 
   console.log(`✓ manifest written (${sprites.length} frames)`);
   console.log(`  original PNG total: ${originalBytes} B`);
@@ -214,7 +269,6 @@ export const ATLAS_FRAMES_2X: Record<string, AtlasFrame> = ${JSON.stringify(fram
   console.log(`  atlas 1x png:       ${pngBytes} B`);
 
   // ── Performance budget checks ──
-  const missing = sprites.filter((s) => !frames1[s.key]);
   if (missing.length) throw new Error(`Manifest missing frames: ${missing.map((m) => m.key).join(", ")}`);
   for (const a of manifest.atlases) {
     if (a.width > MAX_DIM || a.height > MAX_DIM) {
