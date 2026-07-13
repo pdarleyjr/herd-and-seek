@@ -66,7 +66,10 @@ test("two clients complete a Forest round, stay isolated, and start a second rou
     await expect(pageA.getByText("Ranger-B")).toBeVisible({ timeout: 15_000 });
     await expect(pageB.getByText("Ranger-A")).toBeVisible({ timeout: 15_000 });
     await expect(pageC.getByText("Ranger-A")).toHaveCount(0);
-    expect(socketUrls.get(pageA)?.some((url) => url.includes("127.0.0.1:8787"))).toBe(true);
+    const expectedSocketHost = process.env.E2E_BASE_URL
+      ? "herd-and-seek-backend.pdarleyjr.workers.dev"
+      : "127.0.0.1:8787";
+    expect(socketUrls.get(pageA)?.some((url) => url.includes(expectedSocketHost))).toBe(true);
     expect((await debugState(pageA))?.phase).toBe("LOBBY");
     expect((await debugState(pageB))?.phase).toBe("LOBBY");
 

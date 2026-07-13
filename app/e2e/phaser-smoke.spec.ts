@@ -14,8 +14,12 @@ test("Solo Forest boots one Phaser instance and reaches playable state", async (
 
   await authenticate(page, `Solo-${Date.now()}`);
   await page.getByRole("button", { name: /Solo vs AI/i }).click();
-  await page.getByRole("button", { name: /^Ranger Track/i }).click();
-  await page.getByLabel(/Solo round length/i).selectOption("30");
+  const rangerRole = page.getByRole("button", { name: /^Ranger Track/i });
+  await rangerRole.click();
+  await expect(rangerRole).toHaveAttribute("aria-pressed", "true");
+  const durationSelect = page.getByLabel(/Solo round length/i);
+  await durationSelect.selectOption("30");
+  await expect(durationSelect).toHaveValue("30");
   await page.getByRole("button", { name: /Start solo expedition/i }).click();
 
   const world = page.locator('[data-renderer="phaser"][data-scene="match"]');
