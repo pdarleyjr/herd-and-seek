@@ -108,6 +108,9 @@ export interface PlayerState {
   connectionStatus?: "connected" | "reconnecting";
   joinedAt?: number;
   lastSeenAt?: number;
+  perkActiveUntil?: number;
+  perkCooldownUntil?: number;
+  perkConsumed?: boolean;
 }
 
 export interface ReadyPayload {
@@ -117,6 +120,8 @@ export interface ReadyPayload {
 export interface SyncPayload {
   x: number;
   y: number;
+  sequence?: number;
+  timestamp?: number;
 }
 
 export interface ShootPayload {
@@ -171,7 +176,10 @@ export interface SerializedState {
 export interface StartSoloPayload {
   role?: "hunter" | "animal" | "random";
   botCount?: number;
+  difficulty?: SoloDifficulty;
 }
+
+export type SoloDifficulty = "easy" | "normal" | "hard";
 
 export interface AnimalDef {
   value: AnimalType;
@@ -357,11 +365,25 @@ export interface AdminLogMessage {
   payload: { auditLog: AdminAuditEntry[] };
 }
 
+export interface DecoySpawnPayload {
+  x: number;
+  y: number;
+  animalType: AnimalType;
+  ownerId: string;
+  expiresAt?: number;
+}
+
+export interface DecoySpawnMessage {
+  type: "DECOY_SPAWN";
+  payload: DecoySpawnPayload;
+}
+
 export type ServerMessage =
   | SyncStateMessage
   | MatchStartMessage
   | HitMessage
   | GameOverMessage
+  | DecoySpawnMessage
   | AdminOkMessage
   | AdminDeniedMessage
   | AdminLogMessage;
@@ -382,7 +404,7 @@ export type ClientMessage =
   | { type: "SELECT_ANIMAL"; payload: SelectAnimalPayload }
   | { type: "SELECT_PERK"; payload: SelectPerkPayload }
   | { type: "RESTART" }
-  | { type: "DECOY"; payload?: DecoyPayload }
+  | { type: "ACTIVATE_PERK"; payload: { perk: PerkType } }
   | { type: "SET_DURATION"; payload: SetDurationPayload }
   | { type: "START_SOLO"; payload: StartSoloPayload }
   | { type: "SELECT_LEVEL"; payload: SelectLevelPayload }

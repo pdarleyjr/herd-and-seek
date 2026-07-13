@@ -47,7 +47,7 @@ function nearestCollectible(
   zone: OpenWorldZoneState,
   x: number,
   y: number,
-  range = 70,
+  range = 240,
 ): CollectibleNode | null {
   let best: CollectibleNode | null = null;
   let bestDist = range;
@@ -71,13 +71,8 @@ export function resolveContextAction(opts: {
 }): ContextAction | null {
   const { zone, localX, localY, questProgress, lodge } = opts;
 
-  // 1) A collectible in range always takes priority.
-  const node = nearestCollectible(zone, localX, localY);
-  if (node) {
-    return { kind: "collect", label: `Collect ${node.kind}`, nodeId: node.id };
-  }
-
-  // 2) A completed-but-unclaimed quest near the lodge becomes "Claim Reward".
+  // 1) Lodge quest interactions take priority so a new ranger can establish
+  // an objective before nearby collectibles compete for the action button.
   for (const q of zone.quests) {
     const prog = questProgress[q.id];
     if (prog && prog.status === "complete") {
@@ -88,15 +83,24 @@ export function resolveContextAction(opts: {
     }
   }
 
-  // 3) An available repeatable quest near the lodge can be accepted.
-  for (const q of zone.quests) {
-    const prog = questProgress[q.id];
-    if (!prog || prog.status === "available") {
-      const dLodge = Math.hypot(localX - lodge.x, localY - lodge.y);
-      if (dLodge <= 240) {
-        return { kind: "accept", label: `Accept ${q.title}`, questId: q.id };
+  // 2) An available repeatable quest near the lodge can be accepted.
+  const hasActiveQuest = Object.values(questProgress).some((progress) => progress.status === "active" || progress.status === "complete");
+  if (!hasActiveQuest) {
+    for (const q of zone.quests) {
+      const prog = questProgress[q.id];
+      if (!prog || prog.status === "available") {
+        const dLodge = Math.hypot(localX - lodge.x, localY - lodge.y);
+        if (dLodge <= 240) {
+          return { kind: "accept", label: `Accept ${q.title}`, questId: q.id };
+        }
       }
     }
+  }
+
+  // 3) Once an objective exists, an in-range collectible is the next action.
+  const node = nearestCollectible(zone, localX, localY);
+  if (node) {
+    return { kind: "collect", label: `Collect ${node.kind}`, nodeId: node.id };
   }
 
   // 4) Far from lodge: offer a "Return to Lodge" hint button.

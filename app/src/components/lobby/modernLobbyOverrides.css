@@ -1,0 +1,64 @@
+.lobby-v2 .map-card.is-choice-selected {
+  border: 2px solid #315e3f;
+  background: #f4e7c6;
+  color: #27382a;
+  box-shadow: 0 0.35rem 0.9rem #173a2a2e;
+}
+
+.lobby-v2 .animal-strip button.is-choice-selected {
+  border: 2px solid #315e3f;
+  background: #fff1c9;
+  color: #27382a;
+  transform: translateY(-2px);
+}
+
+.lobby-v2 .perk-stack button.is-choice-selected {
+  border: 2px solid #315e3f;
+  background: #fff0c4;
+  color: #293b2c;
+}
+
+.lobby-v2 .perk-stack button.is-choice-selected > i {
+  border: 3px solid #fff;
+  background: #4f8756;
+  box-shadow: 0 0 0 2px #4f8756;
+}
+
+.lobby-v2 .lobby-quiet-button { min-height: 2.75rem; }
+
+@media (max-width: 620px) {
+  .lobby-v2 .lobby-admin-button { display: block; min-width: 3.25rem; padding-inline: .45rem; }
+}
+.lobby-v2 .perk-stack button { flex: 1; min-height: 3.4rem; }
+.lobby-v2 .perk-stack small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.duration-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+  color: #665a3c;
+  font: 700 0.58rem/1 Verdana, sans-serif;
+}
+
+.duration-field select {
+  min-height: 2.75rem;
+  max-width: 8.5rem;
+  border: 1px solid #78643a88;
+  border-radius: 0.45rem;
+  background: #fff1c9;
+  color: #26382b;
+  padding-inline: 0.45rem;
+  font-weight: 800;
+}
+
+@media (max-width: 620px) {
+  .lobby-v2 .room-ticket { min-height: 44px; }
+  .lobby-v2 .profile-stamp { min-width: 44px; min-height: 44px; }
+}

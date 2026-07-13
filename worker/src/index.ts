@@ -26,30 +26,39 @@ export type AnimalType =
 export type PerkType = "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none";
 export type GamePhase = "LOBBY" | "COUNTDOWN" | "PLAYING" | "ENDED";
 
+export function resolveReadyState(current: boolean, requested: boolean | undefined, phase: GamePhase): boolean {
+  if (phase === "LOBBY") return requested ?? !current;
+  // READY is idempotent during the countdown. Only an explicit stand-down can
+  // cancel it; delayed or duplicated ready frames must not toggle the room.
+  if (phase === "COUNTDOWN") return requested === false ? false : current;
+  return current;
+}
+export type SoloDifficulty = "easy" | "normal" | "hard";
+
 // Matches may never use the legacy global default room. Clients must always
 // connect with an explicit room id (multiplayer code, or a solo room id).
-export const COUNTDOWN_MS = 3000;
-export const MAX_PLAYERS_DEFAULT = 8;
+const COUNTDOWN_MS = 3000;
+const MAX_PLAYERS_DEFAULT = 8;
 
 // ── Level system (mirrors app/src/types.ts — keep both in sync) ─────────────
 export type LevelId = "forest" | "deepDark" | "savannah";
 
-export const FOREST_ANIMALS: AnimalType[] = [
+const FOREST_ANIMALS: AnimalType[] = [
   "rabbit", "bear", "owl", "snake",
   "frog", "duck", "dog", "panda",
 ];
 
-export const OCEAN_ANIMALS: AnimalType[] = [
+const OCEAN_ANIMALS: AnimalType[] = [
   "fish", "turtle", "crab", "octopus",
   "jellyfish", "shark", "seahorse", "stingray",
 ];
 
-export const SAVANNAH_ANIMALS: AnimalType[] = [
+const SAVANNAH_ANIMALS: AnimalType[] = [
   "zebra", "gazelle", "wildebeest", "warthog",
   "ostrich", "meerkat", "hyena", "secretarybird",
 ];
 
-export const LEVEL_ANIMALS: Record<LevelId, AnimalType[]> = {
+const LEVEL_ANIMALS: Record<LevelId, AnimalType[]> = {
   forest: FOREST_ANIMALS,
   deepDark: OCEAN_ANIMALS,
   savannah: SAVANNAH_ANIMALS,
@@ -90,6 +99,62 @@ export interface PlayerState {
   botPatrolX?: number;
   botPatrolY?: number;
   botLastUpdate?: number;
+  perkActiveUntil?: number;
+  perkCooldownUntil?: number;
+  perkConsumed?: boolean;
+  lastMoveAt?: number;
+  lastMoveSequence?: number;
+  lastShotAt?: number;
+}
+
+const PERK_TIMING = {
+  sprint: { duration: 1_500, cooldown: 8_000 },
+  camouflage: { duration: 3_000, cooldown: 10_000 },
+  decoy: { duration: 8_000, cooldown: 12_000 },
+} as const;
+
+type ActivatablePerk = keyof typeof PERK_TIMING;
+
+export function activatePerk(
+  player: Pick<PlayerState, "perk" | "perkActiveUntil" | "perkCooldownUntil" | "perkConsumed" | "lastMoveAt">,
+  now: number,
+): { ok: true; effect: ActivatablePerk } | { ok: false; reason: "cooldown" | "passive" | "automatic" | "none" | "consumed" | "moving" } {
+  if (player.perk === "speedBoost") return { ok: false, reason: "passive" };
+  if (player.perk === "extraLife") return { ok: false, reason: "automatic" };
+  if (player.perk === "none") return { ok: false, reason: "none" };
+  if (player.perkConsumed) return { ok: false, reason: "consumed" };
+  if ((player.perkCooldownUntil ?? 0) > now) return { ok: false, reason: "cooldown" };
+  if (player.perk === "camouflage" && player.lastMoveAt && now - player.lastMoveAt < 180) return { ok: false, reason: "moving" };
+  const perk = player.perk as ActivatablePerk;
+  const timing = PERK_TIMING[perk];
+  player.perkActiveUntil = now + timing.duration;
+  player.perkCooldownUntil = now + timing.cooldown;
+  return { ok: true, effect: perk };
+}
+
+export function allowedMovementDistance(
+  player: Pick<PlayerState, "isHunter" | "perk" | "perkActiveUntil">,
+  now: number,
+  elapsedMs: number,
+): number {
+  let unitsPerSecond = (player.isHunter ? 3.7 : 3.2) * 72;
+  if (!player.isHunter && player.perk === "speedBoost") unitsPerSecond *= 1.3;
+  if (!player.isHunter && player.perk === "sprint" && (player.perkActiveUntil ?? 0) > now) unitsPerSecond *= 1.5;
+  return unitsPerSecond * (Math.max(0, Math.min(250, elapsedMs)) / 1_000);
+}
+
+export function safeMatchSpawn(index: number): { x: number; y: number } {
+  const slot = Math.max(0, Math.floor(index)) % 16;
+  return { x: 110 + (slot % 4) * 90, y: 110 + Math.floor(slot / 4) * 90 };
+}
+
+export function difficultyMultiplier(difficulty: SoloDifficulty): number {
+  return difficulty === "easy" ? 0.78 : difficulty === "hard" ? 1.22 : 1;
+}
+
+export function collectibleInRange(player: { x: number; y: number }, node: { x: number; y: number }, maxDistance = 260): boolean {
+  return Number.isFinite(player.x) && Number.isFinite(player.y) && Number.isFinite(node.x) && Number.isFinite(node.y)
+    && Math.hypot(player.x - node.x, player.y - node.y) <= maxDistance;
 }
 
 export interface NpcSeed {
@@ -118,6 +183,7 @@ interface RoomState {
   maxPlayers: number;
   createdAt: number;
   closed: boolean;
+  soloDifficulty: SoloDifficulty;
 }
 
 // ── Open-world shared types ──────────────────────────────────────────────────
@@ -195,7 +261,7 @@ export interface OpenWorldZoneState {
 }
 
 // Open-world quest catalog (server-authoritative).
-export const QUEST_CATALOG: QuestDefinition[] = [
+const QUEST_CATALOG: QuestDefinition[] = [
   {
     id: "repeat_gather_food",
     title: "Gather Food",
@@ -256,8 +322,10 @@ export function questById(id: QuestId): QuestDefinition | undefined {
   return QUEST_CATALOG.find((q) => q.id === id);
 }
 
-export const OW_WORLD_SIZE = 3000;
-export const COLLECTIBLE_RESPAWN_MS = 30_000;
+const OW_WORLD_SIZE = 3000;
+const COLLECTIBLE_RESPAWN_MS = 30_000;
+
+export function questCatalogForTest(): readonly QuestDefinition[] { return QUEST_CATALOG; }
 
 // Deterministic UTC date key, e.g. "2026-07-10". Used for daily-quest reset.
 export function dailyQuestDateUTC(now: number = Date.now()): string {
@@ -316,7 +384,7 @@ function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNod
 
 // ── Match-mode message types ─────────────────────────────────────────────────
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "RESTART" | "DECOY" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD" | "LEAVE_ROOM" | "CLOSE_ROOM";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "ACTIVATE_PERK" | "RESTART" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD" | "LEAVE_ROOM" | "CLOSE_ROOM";
   payload?: {
     role?: "hunter" | "animal" | "random";
     botCount?: number;
@@ -332,6 +400,9 @@ interface ClientMessage {
     adminKey?: string;
     command?: string;
     targetId?: string;
+    sequence?: number;
+    timestamp?: number;
+    difficulty?: SoloDifficulty;
   };
 }
 
@@ -641,10 +712,15 @@ export class GameRoomDurableObject implements DurableObject {
   state: RoomState;
   syncInterval: ReturnType<typeof setInterval> | null = null;
   countdownInterval: ReturnType<typeof setInterval> | null = null;
+  autoResetTimeout: ReturnType<typeof setTimeout> | null = null;
   rewardsGranted = false;
   hunterTagCount = 0;
   adminConns = new Set<string>();
   auditLog: AdminAuditEntry[] = [];
+  private readonly sockets = new Set<WebSocket>();
+  private readonly socketAttachments = new WeakMap<WebSocket, { userId: string; username: string; connectionId: string }>();
+
+  private static readonly STORAGE_KEY = "room_snapshot_v1";
 
   constructor(public ctx: DurableObjectState, public env: Env) {
     this.state = {
@@ -653,7 +729,19 @@ export class GameRoomDurableObject implements DurableObject {
       matchStartTime: 0, countdownEndsAt: null, winner: null, eventLog: [], isSoloMode: false,
       levelId: "forest", hostUserId: null, maxPlayers: MAX_PLAYERS_DEFAULT, createdAt: Date.now(),
       closed: false,
+      soloDifficulty: "normal",
     };
+    const concurrencyGuard = (ctx as DurableObjectState & { blockConcurrencyWhile?: (callback: () => Promise<void>) => Promise<void> }).blockConcurrencyWhile;
+    if (concurrencyGuard) {
+      void concurrencyGuard.call(ctx, async () => {
+        const stored = await ctx.storage.get<{ state: RoomState; rewardsGranted: boolean; hunterTagCount: number; auditLog: AdminAuditEntry[] }>(GameRoomDurableObject.STORAGE_KEY);
+        if (!stored) return;
+        this.state = { ...this.state, ...stored.state };
+        this.rewardsGranted = stored.rewardsGranted;
+        this.hunterTagCount = stored.hunterTagCount;
+        this.auditLog = Array.isArray(stored.auditLog) ? stored.auditLog.slice(-100) : [];
+      });
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -682,14 +770,18 @@ export class GameRoomDurableObject implements DurableObject {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ userId, username, connectionId });
+    server.accept();
+    this.sockets.add(server);
+    this.socketAttachments.set(server, { userId, username, connectionId });
+    server.addEventListener("message", (event) => this.webSocketMessage(server, event.data));
+    server.addEventListener("close", (event) => this.webSocketClose(server, event.code, event.reason, event.wasClean));
+    server.addEventListener("error", (event) => this.webSocketError(server, event));
     this.addPlayer(userId, username, connectionId);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
+    const attachment = this.attachmentFor(ws);
     if (!attachment) return;
     const userId = attachment.userId;
     const connectionId = attachment.connectionId;
@@ -710,7 +802,8 @@ export class GameRoomDurableObject implements DurableObject {
 
     switch (parsed.type) {
       case "READY":
-        player.isReady = parsed.payload?.isReady ?? !player.isReady;
+        if (this.state.phase !== "LOBBY" && this.state.phase !== "COUNTDOWN") break;
+        player.isReady = resolveReadyState(player.isReady, parsed.payload?.isReady, this.state.phase);
         logEvent("ready", { roomId: this.roomId(), userId, isReady: player.isReady });
         this.broadcastState();
         if (this.state.phase === "COUNTDOWN") {
@@ -734,9 +827,10 @@ export class GameRoomDurableObject implements DurableObject {
         }
         break;
       case "SELECT_LEVEL": {
-        if (this.state.phase !== "LOBBY") break;
+        if (this.state.phase !== "LOBBY") { logEvent("level_selection_rejected", { roomId: this.roomId(), userId, phase: this.state.phase }); break; }
         const requested = parsed.payload?.levelId;
-        if (!isValidLevelId(requested)) break;
+        if (!isValidLevelId(requested)) { logEvent("level_selection_rejected", { roomId: this.roomId(), userId, reason: "invalid_level" }); break; }
+        logEvent("level_selected", { roomId: this.roomId(), userId, requested });
         if (requested === this.state.levelId) { this.broadcastState(); break; }
         this.state.levelId = requested;
         for (const p of this.state.players) {
@@ -754,23 +848,46 @@ export class GameRoomDurableObject implements DurableObject {
         break;
       case "SYNC":
         if (this.state.phase === "PLAYING" && player.isAlive) {
-          const { x, y } = parsed.payload || {};
-          if (typeof x === "number" && typeof y === "number") {
-            player.x = Math.max(0, Math.min(WORLD_SIZE, x));
-            player.y = Math.max(0, Math.min(WORLD_SIZE, y));
+          const { x, y, sequence } = parsed.payload || {};
+          if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) {
+            const now = Date.now();
+            if (typeof sequence === "number" && sequence <= (player.lastMoveSequence ?? -1)) break;
+            if (player.perk === "camouflage" && (player.perkActiveUntil ?? 0) > now) break;
+            const elapsed = player.lastMoveAt ? Math.max(16, now - player.lastMoveAt) : 50;
+            const maxDistance = allowedMovementDistance(player, now, elapsed) * 1.35 + 8;
+            const targetX = Math.max(0, Math.min(WORLD_SIZE, x));
+            const targetY = Math.max(0, Math.min(WORLD_SIZE, y));
+            const dx = targetX - player.x;
+            const dy = targetY - player.y;
+            const distance = Math.hypot(dx, dy);
+            if (distance <= maxDistance) {
+              player.x = targetX;
+              player.y = targetY;
+            } else if (distance > 0) {
+              player.x += (dx / distance) * maxDistance;
+              player.y += (dy / distance) * maxDistance;
+            }
+            player.lastMoveAt = now;
+            if (typeof sequence === "number") player.lastMoveSequence = sequence;
           }
         }
         break;
+      case "ACTIVATE_PERK": {
+        if (this.state.phase !== "PLAYING" || !player.isAlive || player.isHunter || parsed.payload?.perk !== player.perk) break;
+        const result = activatePerk(player, Date.now());
+        if (result.ok) {
+          if (result.effect === "decoy") {
+            this.broadcast({ type: "DECOY_SPAWN", payload: { x: player.x, y: player.y, animalType: player.animalType, ownerId: userId, expiresAt: player.perkActiveUntil } });
+          }
+          this.broadcastState();
+        }
+        break;
+      }
       case "SHOOT":
-        if (this.state.phase === "PLAYING" && player.isHunter) this.handleShoot(parsed.payload);
+        if (this.state.phase === "PLAYING" && player.isHunter) this.handleShoot(player, parsed.payload);
         break;
       case "RESTART":
         if (this.state.phase === "ENDED") { this.resetRoom(); this.broadcastState(); }
-        break;
-      case "DECOY":
-        if (this.state.phase === "PLAYING" && player.isAlive && !player.isHunter && player.perk === "decoy") {
-          this.broadcast({ type: "DECOY_SPAWN", payload: { x: player.x, y: player.y, animalType: player.animalType, ownerId: userId } });
-        }
         break;
       case "START_SOLO":
         if (this.state.phase === "LOBBY" && !player.isBot) {
@@ -779,7 +896,8 @@ export class GameRoomDurableObject implements DurableObject {
           else if (parsed.payload?.role === "animal") role = "animal";
           else role = "random";
           const botCount = parsed.payload?.botCount ?? 4;
-          this.startSoloMatch(userId, role, botCount);
+          const difficulty = parsed.payload?.difficulty === "easy" || parsed.payload?.difficulty === "hard" ? parsed.payload.difficulty : "normal";
+          this.startSoloMatch(userId, role, botCount, difficulty);
         }
         break;
       case "SET_DURATION":
@@ -795,8 +913,8 @@ export class GameRoomDurableObject implements DurableObject {
         break;
       case "LEAVE_ROOM":
         this.removePlayer(userId);
-        for (const ws of this.ctx.getWebSockets()) {
-          const att = ws.deserializeAttachment() as { userId: string } | null;
+        for (const ws of this.allSockets()) {
+          const att = this.attachmentFor(ws);
           if (att?.userId === userId) { try { ws.close(1000, "client_leave"); } catch { /* ignore */ } }
         }
         break;
@@ -804,7 +922,7 @@ export class GameRoomDurableObject implements DurableObject {
         if (this.state.hostUserId === userId) {
           this.state.closed = true;
           logEvent("room_closed", { roomId: this.roomId(), by: userId });
-          for (const ws of this.ctx.getWebSockets()) { try { ws.close(4001, "room_closed"); } catch { /* ignore */ } }
+          for (const ws of this.allSockets()) { try { ws.close(4001, "room_closed"); } catch { /* ignore */ } }
           this.resetRoom();
           this.state.closed = true;
         }
@@ -813,15 +931,17 @@ export class GameRoomDurableObject implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
+    const attachment = this.attachmentFor(ws);
     if (!attachment) return;
+    this.sockets.delete(ws);
     this.adminConns.delete(attachment.connectionId);
     this.removePlayer(attachment.userId, attachment.connectionId);
     if (this.state.players.length === 0) this.stopLoops();
   }
   webSocketError(ws: WebSocket, _error: unknown): void {
-    const attachment = ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null;
+    const attachment = this.attachmentFor(ws);
     if (!attachment) return;
+    this.sockets.delete(ws);
     this.removePlayer(attachment.userId, attachment.connectionId);
   }
 
@@ -900,8 +1020,8 @@ export class GameRoomDurableObject implements DurableObject {
     const hunterIndex = Math.floor(Math.random() * players.length);
     const hunterId = players[hunterIndex].id;
     players.forEach((p, i) => {
-      p.isHunter = i === hunterIndex; p.isAlive = true; p.isReady = false; p.extraLifeUsed = false;
-      p.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50; p.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+      p.isHunter = i === hunterIndex; p.isAlive = true; p.extraLifeUsed = false;
+      const spawn = safeMatchSpawn(i); p.x = spawn.x; p.y = spawn.y;
       if (!p.isHunter && !isAnimalAllowed(p.animalType, this.state.levelId)) p.animalType = defaultAnimalForLevel(this.state.levelId);
     });
     this.state.hunterId = hunterId;
@@ -922,19 +1042,23 @@ export class GameRoomDurableObject implements DurableObject {
   private beginPlaying() {
     if (this.state.phase !== "COUNTDOWN") return;
     this.state.phase = "PLAYING";
+    this.state.players.forEach((player) => { player.isReady = false; });
     this.state.countdownEndsAt = null;
     this.state.matchStartTime = Date.now();
     this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
     this.startSyncLoop();
   }
 
-  handleShoot(payload: any) {
+  handleShoot(hunter: PlayerState, payload: any) {
     if (this.state.phase !== "PLAYING") return;
     const { targetX, targetY } = payload || {};
     if (typeof targetX !== "number" || typeof targetY !== "number") return;
     if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
     if (targetX < 0 || targetX > WORLD_SIZE || targetY < 0 || targetY > WORLD_SIZE) return;
     if (this.state.ammo <= 0) return;
+    const now = Date.now();
+    if (now - (hunter.lastShotAt ?? 0) < 220) return;
+    hunter.lastShotAt = now;
     this.state.ammo -= 1;
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
@@ -982,7 +1106,12 @@ export class GameRoomDurableObject implements DurableObject {
     this.grantMatchRewards(winner);
     logEvent("match_end", { roomId: this.roomId(), winner, reason, isSolo: this.state.isSoloMode });
     this.broadcast({ type: "GAME_OVER", payload: { winner, reason, state: this.serializeState() } });
-    setTimeout(() => { this.resetRoom(); this.broadcastState(); }, 5000);
+    if (this.autoResetTimeout) clearTimeout(this.autoResetTimeout);
+    this.autoResetTimeout = setTimeout(() => {
+      this.autoResetTimeout = null;
+      this.resetRoom();
+      this.broadcastState();
+    }, 5000);
   }
 
   grantMatchRewards(winner: "hunter" | "animals") {
@@ -1064,8 +1193,8 @@ export class GameRoomDurableObject implements DurableObject {
       case "kick": {
         const targetId = payload.targetId;
         if (targetId) {
-          for (const sock of this.ctx.getWebSockets()) {
-            const att = sock.deserializeAttachment() as { userId: string } | null;
+          for (const sock of this.allSockets()) {
+            const att = this.attachmentFor(sock);
             if (att?.userId === targetId) { try { sock.close(1000, "Removed by admin"); } catch { /* ignore */ } }
           }
           this.state.players = this.state.players.filter((p) => p.id !== targetId);
@@ -1113,12 +1242,18 @@ export class GameRoomDurableObject implements DurableObject {
     if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = null; }
   }
   resetRoom() {
+    if (this.autoResetTimeout) { clearTimeout(this.autoResetTimeout); this.autoResetTimeout = null; }
     this.stopLoops();
     this.state.phase = "LOBBY"; this.state.hunterId = null; this.state.ammo = 0; this.state.maxAmmo = 0;
     this.state.timeRemaining = this.state.matchDuration; this.state.winner = null; this.state.npcSeeds = [];
     this.state.eventLog = []; this.state.isSoloMode = false; this.state.countdownEndsAt = null;
+    this.state.soloDifficulty = "normal";
     this.state.players = this.state.players.filter((p) => !p.isBot);
-    this.state.players.forEach((p) => { p.isHunter = false; p.isReady = false; p.isAlive = true; p.perk = "none"; p.extraLifeUsed = false; });
+    this.state.players.forEach((p) => {
+      p.isHunter = false; p.isReady = false; p.isAlive = true; p.perk = "none"; p.extraLifeUsed = false;
+      p.perkActiveUntil = 0; p.perkCooldownUntil = 0; p.perkConsumed = false;
+      p.lastMoveAt = undefined; p.lastMoveSequence = undefined; p.lastShotAt = undefined;
+    });
   }
   serializeState() {
     return {
@@ -1126,6 +1261,7 @@ export class GameRoomDurableObject implements DurableObject {
       players: this.state.players.map((p) => ({
         id: p.id, username: p.username, x: p.x, y: p.y, animalType: p.animalType, isHunter: p.isHunter,
         isReady: p.isReady, isAlive: p.isAlive, perk: p.perk, extraLifeUsed: p.extraLifeUsed, isBot: p.isBot ?? false,
+        perkActiveUntil: p.perkActiveUntil ?? 0, perkCooldownUntil: p.perkCooldownUntil ?? 0, perkConsumed: p.perkConsumed ?? false,
         connectionStatus: "connected" as const, joinedAt: this.state.createdAt, lastSeenAt: Date.now(),
       })),
       npcSeeds: this.state.npcSeeds, hunterId: this.state.hunterId, ammo: this.state.ammo, maxAmmo: this.state.maxAmmo,
@@ -1136,12 +1272,36 @@ export class GameRoomDurableObject implements DurableObject {
   }
   broadcast(msg: ServerMessage) {
     const data = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) { try { ws.send(data); } catch { /* closed */ } }
+    for (const ws of this.allSockets()) { try { ws.send(data); } catch { /* closed */ } }
   }
-  broadcastState() { this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() }); }
+  broadcastState() {
+    this.persistState();
+    this.broadcast({ type: "SYNC_STATE", payload: this.serializeState() });
+  }
+
+  private persistState(): void {
+    void this.ctx.storage.put(GameRoomDurableObject.STORAGE_KEY, {
+      state: this.state,
+      rewardsGranted: this.rewardsGranted,
+      hunterTagCount: this.hunterTagCount,
+      auditLog: this.auditLog.slice(-100),
+    }).catch((error) => logEvent("room_persist_failed", { roomId: this.roomId(), detail: error instanceof Error ? error.message : "unknown" }));
+  }
+
+  private attachmentFor(ws: WebSocket): { userId: string; username: string; connectionId: string } | null {
+    const current = this.socketAttachments.get(ws);
+    if (current) return current;
+    try { return ws.deserializeAttachment() as { userId: string; username: string; connectionId: string } | null; } catch { return null; }
+  }
+
+  private allSockets(): WebSocket[] {
+    const combined = new Set<WebSocket>(this.sockets);
+    try { for (const socket of this.ctx.getWebSockets()) combined.add(socket); } catch { /* legacy hibernatable sockets only */ }
+    return [...combined];
+  }
 
   // ── Solo / Bot system ─────────────────────────────────────────────────────
-  startSoloMatch(humanId: string, humanRole: "hunter" | "animal" | "random", botCount: number) {
+  startSoloMatch(humanId: string, humanRole: "hunter" | "animal" | "random", botCount: number, difficulty: SoloDifficulty = "normal") {
     if (this.state.phase !== "LOBBY") return;
     const human = this.state.players.find((p) => p.id === humanId);
     if (!human) return;
@@ -1149,6 +1309,7 @@ export class GameRoomDurableObject implements DurableObject {
     const BOT_ANIMAL_TYPES: AnimalType[] = animalsForLevel(this.state.levelId);
     if (!isAnimalAllowed(human.animalType, this.state.levelId)) human.animalType = defaultAnimalForLevel(this.state.levelId);
     const finalRole = humanRole === "random" ? (Math.random() < 0.5 ? "hunter" : "animal") : humanRole;
+    this.state.soloDifficulty = difficulty;
     if (finalRole === "hunter") {
       human.isHunter = true;
       const animalBots = Math.max(2, botCount - 1);
@@ -1167,7 +1328,7 @@ export class GameRoomDurableObject implements DurableObject {
       }
     }
     human.isAlive = true; human.isReady = false; human.extraLifeUsed = false;
-    human.x = Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150; human.y = Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150;
+    this.state.players.forEach((player, index) => { const spawn = safeMatchSpawn(index); player.x = spawn.x; player.y = spawn.y; });
     const animalCount = this.state.players.filter((p) => !p.isHunter).length;
     this.state.ammo = animalCount * 10; this.state.maxAmmo = animalCount * 10;
     this.state.npcSeeds = generateNpcSeeds(npcCountForPlayers(this.state.players.length), animalsForLevel(this.state.levelId));
@@ -1193,7 +1354,7 @@ export class GameRoomDurableObject implements DurableObject {
     if (nowMs - lastDecision > 900 + Math.random() * 2300) {
       bot.botLastDecision = nowMs;
       const angle = Math.random() * Math.PI * 2;
-      const speed = 3.0 + Math.random() * 0.6;
+      const speed = (3.0 + Math.random() * 0.6) * difficultyMultiplier(this.state.soloDifficulty);
       bot.botVx = Math.cos(angle) * speed;
       bot.botVy = Math.sin(angle) * speed;
       if (Math.random() < 0.10) { bot.botVx = 0; bot.botVy = 0; }
@@ -1223,7 +1384,8 @@ export class GameRoomDurableObject implements DurableObject {
         bot.botPatrolY = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.sin(angle) * range));
       }
     }
-    const PATROL_SPEED = 180; const CHASE_SPEED = 240;
+    const difficulty = difficultyMultiplier(this.state.soloDifficulty);
+    const PATROL_SPEED = 180 * difficulty; const CHASE_SPEED = 240 * difficulty;
     let moveX: number, moveY: number, moveDist: number, speed: number;
     if (bot.botPatrolling) {
       const px = bot.botPatrolX ?? WORLD_SIZE / 2; const py = bot.botPatrolY ?? WORLD_SIZE / 2;
@@ -1234,19 +1396,23 @@ export class GameRoomDurableObject implements DurableObject {
       bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed * dt));
     }
     const SHOOT_RANGE = 260; const lastShot = bot.botLastShot ?? 0;
-    if (!bot.botPatrolling && nearestDist < SHOOT_RANGE && nowMs - lastShot > 3000) {
+    const shotCooldown = this.state.soloDifficulty === "easy" ? 4_500 : this.state.soloDifficulty === "hard" ? 1_900 : 3_000;
+    if (!bot.botPatrolling && nearestDist < SHOOT_RANGE && this.state.ammo > 0 && nowMs - lastShot > shotCooldown) {
       bot.botLastShot = nowMs;
-      const errorX = (Math.random() - 0.5) * 160; const errorY = (Math.random() - 0.5) * 160;
+      const spread = this.state.soloDifficulty === "easy" ? 240 : this.state.soloDifficulty === "hard" ? 90 : 160;
+      const errorX = (Math.random() - 0.5) * spread; const errorY = (Math.random() - 0.5) * spread;
       this.handleBotShoot(nearest.x + errorX, nearest.y + errorY);
     }
   }
   handleBotShoot(targetX: number, targetY: number) {
+    if (this.state.phase !== "PLAYING" || this.state.ammo <= 0 || !Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
+    this.state.ammo -= 1;
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) { if (p.isHunter || !p.isAlive) continue; const d = Math.hypot(targetX - p.x, targetY - p.y); if (d <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; } }
     if (hitPlayer) {
       if (hitPlayer.perk === "extraLife" && !hitPlayer.extraLifeUsed) {
         hitPlayer.animalType = randomAnimalExcept(hitPlayer.animalType, animalsForLevel(this.state.levelId));
-        hitPlayer.x = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50; hitPlayer.y = Math.floor(Math.random() * (WORLD_SIZE - 100)) + 50;
+        const spawn = safeMatchSpawn(this.state.players.indexOf(hitPlayer)); hitPlayer.x = spawn.x; hitPlayer.y = spawn.y;
         hitPlayer.perk = "none"; hitPlayer.extraLifeUsed = true;
         this.state.eventLog.unshift(`${hitPlayer.username}'s Extra Life saved them!`);
         this.broadcast({ type: "HIT", payload: { targetId: hitPlayer.id, targetX, targetY, hit: true, extraLife: true, animalType: hitPlayer.animalType, x: hitPlayer.x, y: hitPlayer.y } });
@@ -1259,6 +1425,7 @@ export class GameRoomDurableObject implements DurableObject {
     } else {
       this.state.eventLog.unshift("AI Hunter missed!");
       this.broadcast({ type: "HIT", payload: { targetId: null, targetX, targetY, hit: false } });
+      if (this.state.ammo <= 0) this.endGame("animals", "AI Hunter ran out of ammo!");
     }
     this.state.eventLog = this.state.eventLog.slice(0, 10);
   }
@@ -1288,12 +1455,21 @@ interface OWState {
 export class OpenWorldZoneDurableObject implements DurableObject {
   state: OWState;
   broadcastInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly sockets = new Set<WebSocket>();
+  private readonly socketAttachments = new WeakMap<WebSocket, { userId: string; username: string; zoneId: ZoneId; connectionId: string }>();
 
   constructor(public ctx: DurableObjectState, public env: Env) {
     this.state = {
       players: [], collectibles: [], dailySeed: "", lastResetDate: "",
       activeWorldEvent: null,
     };
+    const concurrencyGuard = (ctx as DurableObjectState & { blockConcurrencyWhile?: (callback: () => Promise<void>) => Promise<void> }).blockConcurrencyWhile;
+    if (concurrencyGuard) {
+      void concurrencyGuard.call(ctx, async () => {
+        const stored = await ctx.storage.get<OWState>("ow");
+        if (stored) this.state = { ...stored, players: [] };
+      });
+    }
   }
 
   private todaySeed(): string {
@@ -1321,8 +1497,12 @@ export class OpenWorldZoneDurableObject implements DurableObject {
 
     const pair = new WebSocketPair();
     const client = pair[0]; const server = pair[1];
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ userId, username, zoneId, connectionId });
+    server.accept();
+    this.sockets.add(server);
+    this.socketAttachments.set(server, { userId, username, zoneId, connectionId });
+    server.addEventListener("message", (event) => this.webSocketMessage(server, event.data));
+    server.addEventListener("close", (event) => this.webSocketClose(server, event.code, event.reason, event.wasClean));
+    server.addEventListener("error", (event) => this.webSocketError(server, event));
 
     const existing = this.state.players.find((p) => p.id === userId);
     if (existing) { existing.connId = connectionId; }
@@ -1339,7 +1519,7 @@ export class OpenWorldZoneDurableObject implements DurableObject {
   }
 
   webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
-    const att = ws.deserializeAttachment() as { userId: string; username: string; zoneId: ZoneId; connectionId: string } | null;
+    const att = this.attachmentFor(ws);
     if (!att) return;
     let parsed: OpenWorldClientMessage;
     try { parsed = JSON.parse(message as string); } catch { return; }
@@ -1359,10 +1539,12 @@ export class OpenWorldZoneDurableObject implements DurableObject {
         if (typeof parsed.payload?.x === "number") player.x = clampOW(parsed.payload.x);
         if (typeof parsed.payload?.y === "number") player.y = clampOW(parsed.payload.y);
         if (parsed.payload?.animalType) player.animalType = parsed.payload.animalType;
+        void this.ctx.storage.put("ow", this.state);
         break;
       }
       case "OPEN_WORLD_LEAVE": {
         this.state.players = this.state.players.filter((p) => p.id !== att.userId);
+        void this.ctx.storage.put("ow", this.state);
         this.broadcastState();
         break;
       }
@@ -1371,12 +1553,14 @@ export class OpenWorldZoneDurableObject implements DurableObject {
         if (!nodeId) break;
         const node = this.state.collectibles.find((n) => n.id === nodeId);
         if (!node) { this.sendTo(ws, { type: "OPEN_WORLD_ERROR", payload: { code: "no_node", message: "Node not found" } }); break; }
+        if (!collectibleInRange(player, node)) { this.sendTo(ws, { type: "OPEN_WORLD_ERROR", payload: { code: "out_of_range", message: "Move closer to collect this field find." } }); break; }
         if (!collectibleGrantable(node.respawnAt, Date.now())) break; // still respawning
         // Anti-double-collect: per-connection recent-collect guard.
         const last = player.lastCollectAt[nodeId] ?? 0;
         if (Date.now() - last < 1500) break;
         player.lastCollectAt[nodeId] = Date.now();
         node.respawnAt = Date.now() + COLLECTIBLE_RESPAWN_MS;
+        void this.ctx.storage.put("ow", this.state);
         this.broadcast({ type: "COLLECTIBLE_COLLECTED", payload: { nodeId, byUserId: att.userId } });
         void this.grantCollectible(player, node);
         this.broadcastState();
@@ -1405,8 +1589,9 @@ export class OpenWorldZoneDurableObject implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket, _c: number, _r: string, _w: boolean): void {
-    const att = ws.deserializeAttachment() as { userId: string; connectionId: string } | null;
+    const att = this.attachmentFor(ws);
     if (!att) return;
+    this.sockets.delete(ws);
     const player = this.state.players.find((p) => p.id === att.userId);
     if (player && player.connId === att.connectionId) {
       this.state.players = this.state.players.filter((p) => p.id !== att.userId);
@@ -1446,12 +1631,24 @@ export class OpenWorldZoneDurableObject implements DurableObject {
   }
 
   private async grantCollectible(player: OWPlayer, node: CollectibleNode): Promise<void> {
+    const before = await this.getProfile(player.id, player.username);
+    const questProgress: Record<string, QuestProgress> = {};
+    if (before) {
+      for (const def of QUEST_CATALOG) {
+        const current = before.questProgress[def.id];
+        if (def.objectiveType !== "collect" || current?.status !== "active") continue;
+        const progress = Math.min(def.targetCount, current.progress + 1);
+        questProgress[def.id] = { ...current, progress, status: progress >= def.targetCount ? "complete" : "active", completedAt: progress >= def.targetCount ? Date.now() : current.completedAt };
+      }
+    }
     const prof = await this.owSync(player.id, player.username, {
       stats: { collectiblesFound: 1 },
       reward: { coins: node.value, metadata: { source: "collectible", kind: node.kind, nodeId: node.id } },
+      ...(Object.keys(questProgress).length ? { questProgress } : {}),
     });
     if (prof) {
       this.sendToPlayer(player.id, { type: "REWARD_GRANTED", payload: { coins: node.value, xp: 0, badges: 0, reason: `collect_${node.kind}` } });
+      for (const quest of Object.values(questProgress)) this.sendToPlayer(player.id, { type: "QUEST_UPDATED", payload: quest });
       this.sendProfileSync(player.id, prof);
     }
   }
@@ -1512,8 +1709,8 @@ export class OpenWorldZoneDurableObject implements DurableObject {
   }
 
   private sendToPlayer(userId: string, msg: OpenWorldServerMessage): void {
-    for (const ws of this.ctx.getWebSockets()) {
-      const att = ws.deserializeAttachment() as { userId: string } | null;
+    for (const ws of this.allSockets()) {
+      const att = this.attachmentFor(ws);
       if (att?.userId === userId) { try { ws.send(JSON.stringify(msg)); } catch { /* closed */ } }
     }
   }
@@ -1538,11 +1735,23 @@ export class OpenWorldZoneDurableObject implements DurableObject {
       serverTime: Date.now(),
     };
     const data = JSON.stringify({ type: "OPEN_WORLD_STATE", payload });
-    for (const ws of this.ctx.getWebSockets()) { try { ws.send(data); } catch { /* closed */ } }
+    for (const ws of this.allSockets()) { try { ws.send(data); } catch { /* closed */ } }
+  }
+
+  private attachmentFor(ws: WebSocket): { userId: string; username: string; zoneId: ZoneId; connectionId: string } | null {
+    const current = this.socketAttachments.get(ws);
+    if (current) return current;
+    try { return ws.deserializeAttachment() as { userId: string; username: string; zoneId: ZoneId; connectionId: string } | null; } catch { return null; }
+  }
+
+  private allSockets(): WebSocket[] {
+    const combined = new Set<WebSocket>(this.sockets);
+    try { for (const socket of this.ctx.getWebSockets()) combined.add(socket); } catch { /* legacy hibernatable sockets only */ }
+    return [...combined];
   }
   private broadcast(msg: OpenWorldServerMessage): void {
     const data = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) { try { ws.send(data); } catch { /* closed */ } }
+    for (const ws of this.allSockets()) { try { ws.send(data); } catch { /* closed */ } }
   }
 }
 

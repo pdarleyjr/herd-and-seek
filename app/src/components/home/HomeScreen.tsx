@@ -8,7 +8,7 @@ import { useViewportInfo } from "../../hooks/useViewportInfo";
 interface HomeScreenProps {
   nameInput: string;
   onNameChange: (v: string) => void;
-  onSubmit: () => void;
+  onSubmit: (name: string) => void;
 }
 
 export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeScreenProps) {
@@ -26,7 +26,7 @@ export default function HomeScreen({ nameInput, onNameChange, onSubmit }: HomeSc
       return;
     }
     setError("");
-    onSubmit();
+    onSubmit(name);
   };
 
   const handleChange = (v: string) => {

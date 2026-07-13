@@ -8,8 +8,9 @@ import type {
   QuestId,
   ZoneId,
 } from "./openWorldTypes";
+import { BACKEND_WS_ORIGIN } from "../backend";
 
-const WS_BASE = "wss://herd-and-seek-backend.pdarleyjr.workers.dev/open-world";
+const WS_BASE = `${BACKEND_WS_ORIGIN}/open-world`;
 
 export interface RewardEvent {
   coins: number;
@@ -103,6 +104,7 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
             break;
           case "PROFILE_SYNC":
             setProfile(msg.payload);
+            setQuestProgress(msg.payload.questProgress ?? {});
             break;
           case "QUEST_UPDATED":
             setQuestProgress((prev) => ({ ...prev, [msg.payload.questId]: msg.payload }));

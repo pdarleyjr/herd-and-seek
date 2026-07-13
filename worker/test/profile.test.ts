@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   newProfile,
   applyReward,
@@ -16,10 +16,124 @@ import {
   PlayerProfileDurableObject,
   GameRoomDurableObject,
   OpenWorldZoneDurableObject,
-  QUEST_CATALOG,
+  questCatalogForTest,
+  activatePerk,
+  allowedMovementDistance,
+  safeMatchSpawn,
+  difficultyMultiplier,
+  collectibleInRange,
+  resolveReadyState,
   type PlayerProfile,
   type QuestDefinition,
 } from "../src/index";
+
+describe("authoritative perk rules", () => {
+  const player = (perk: "sprint" | "camouflage" | "extraLife" | "decoy" | "speedBoost" | "none") => ({
+    id: "animal", username: "Animal", x: 100, y: 100, animalType: "rabbit" as const,
+    isHunter: false, isReady: true, isAlive: true, perk, extraLifeUsed: false,
+    perkActiveUntil: 0, perkCooldownUntil: 0, perkConsumed: false,
+    lastMoveAt: 0,
+  });
+
+  it("authorizes sprint duration and cooldown", () => {
+    const p = player("sprint");
+    expect(activatePerk(p, 1_000)).toEqual({ ok: true, effect: "sprint" });
+    expect(p.perkActiveUntil).toBe(2_500);
+    expect(p.perkCooldownUntil).toBe(9_000);
+    expect(activatePerk(p, 2_000)).toEqual({ ok: false, reason: "cooldown" });
+  });
+
+  it("keeps passive and automatic perks non-activatable", () => {
+    expect(activatePerk(player("speedBoost"), 1_000)).toEqual({ ok: false, reason: "passive" });
+    expect(activatePerk(player("extraLife"), 1_000)).toEqual({ ok: false, reason: "automatic" });
+  });
+
+  it("requires camouflage to begin from a stationary state", () => {
+    const moving = player("camouflage");
+    moving.lastMoveAt = 950;
+    expect(activatePerk(moving, 1_000)).toEqual({ ok: false, reason: "moving" });
+    moving.lastMoveAt = 700;
+    expect(activatePerk(moving, 1_000)).toEqual({ ok: true, effect: "camouflage" });
+    expect(moving.perkActiveUntil).toBe(4_000);
+    expect(moving.perkCooldownUntil).toBe(11_000);
+  });
+
+  it("authorizes one bounded decoy window and enforces cooldown", () => {
+    const decoy = player("decoy");
+    expect(activatePerk(decoy, 2_000)).toEqual({ ok: true, effect: "decoy" });
+    expect(decoy.perkActiveUntil).toBe(10_000);
+    expect(decoy.perkCooldownUntil).toBe(14_000);
+    expect(activatePerk(decoy, 3_000)).toEqual({ ok: false, reason: "cooldown" });
+  });
+
+  it("rejects activation for no perk", () => {
+    expect(activatePerk(player("none"), 1_000)).toEqual({ ok: false, reason: "none" });
+  });
+
+  it("validates speed boost and sprint movement on the server", () => {
+    expect(allowedMovementDistance(player("none"), 1_000, 100)).toBeCloseTo(23.04, 2);
+    expect(allowedMovementDistance(player("speedBoost"), 1_000, 100)).toBeCloseTo(29.952, 2);
+    const sprint = player("sprint");
+    activatePerk(sprint, 1_000);
+    expect(allowedMovementDistance(sprint, 1_200, 100)).toBeCloseTo(34.56, 2);
+  });
+
+  it("keeps every supported match spawn inside the collider-free meadow", () => {
+    const spawns = Array.from({ length: 16 }, (_, index) => safeMatchSpawn(index));
+    expect(new Set(spawns.map((spawn) => `${spawn.x}:${spawn.y}`)).size).toBe(16);
+    expect(spawns.every((spawn) => spawn.x >= 110 && spawn.x <= 380 && spawn.y >= 110 && spawn.y <= 380)).toBe(true);
+  });
+
+  it("scales solo AI without changing normal difficulty", () => {
+    expect(difficultyMultiplier("easy")).toBeLessThan(1);
+    expect(difficultyMultiplier("normal")).toBe(1);
+    expect(difficultyMultiplier("hard")).toBeGreaterThan(1);
+  });
+
+  it("requires an authoritative nearby position for Open World collection", () => {
+    expect(collectibleInRange({ x: 100, y: 100 }, { x: 250, y: 200 })).toBe(true);
+    expect(collectibleInRange({ x: 100, y: 100 }, { x: 500, y: 500 })).toBe(false);
+    expect(collectibleInRange({ x: Number.NaN, y: 100 }, { x: 100, y: 100 })).toBe(false);
+  });
+
+  it("charges authoritative ammo for an AI trigger pull", () => {
+    const room = new GameRoomDurableObject(fakeCtx(), env);
+    room.state.phase = "PLAYING";
+    room.state.ammo = 2;
+    room.state.maxAmmo = 2;
+    room.state.players = [{ id: "bot", username: "Bot", x: 100, y: 100, animalType: "rabbit", isHunter: true, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true }];
+    room.handleBotShoot(600, 600);
+    expect(room.state.ammo).toBe(1);
+  });
+});
+
+describe("authoritative ready lifecycle", () => {
+  it("keeps duplicate ready frames idempotent during countdown", () => {
+    expect(resolveReadyState(true, true, "COUNTDOWN")).toBe(true);
+    expect(resolveReadyState(true, undefined, "COUNTDOWN")).toBe(true);
+  });
+
+  it("allows only an explicit stand-down to cancel countdown readiness", () => {
+    expect(resolveReadyState(true, false, "COUNTDOWN")).toBe(false);
+    expect(resolveReadyState(false, true, "LOBBY")).toBe(true);
+    expect(resolveReadyState(true, false, "PLAYING")).toBe(true);
+  });
+
+  it("cancels a stale result reset before a new countdown starts", () => {
+    vi.useFakeTimers();
+    try {
+      const room = new GameRoomDurableObject(fakeCtx(), env);
+      room.state.phase = "PLAYING";
+      room.endGame("animals", "test result");
+      room.resetRoom();
+      room.state.phase = "COUNTDOWN";
+      vi.advanceTimersByTime(5_000);
+      expect(room.state.phase).toBe("COUNTDOWN");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 // ── In-memory Durable Object state mock ──────────────────────────────────────
 function fakeCtx() {
@@ -30,6 +144,7 @@ function fakeCtx() {
       put: async (k: string, v: unknown) => void map.set(k, v),
       delete: async (k: string) => void map.delete(k),
     },
+    blockConcurrencyWhile(callback: () => Promise<void>) { return callback(); },
     acceptWebSocket() {},
     getWebSockets() {
       return [];
@@ -171,7 +286,7 @@ describe("open-world idempotency and daily reset", () => {
 
   it("duplicate quest claim is idempotent and does not double-pay", () => {
     const p = profile() as unknown as ProfileLike;
-    const def = QUEST_CATALOG[0];
+    const def = questCatalogForTest()[0];
     const cur = completeQuest(def);
     const r1 = applyQuestClaim(p, def, cur);
     expect(r1.changed).toBe(true);

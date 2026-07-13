@@ -1,10 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
+const LOCAL_WORKER_URL = "http://127.0.0.1:8787";
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: true,
+  fullyParallel: false,
+  workers: 3,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60000,
@@ -14,19 +16,30 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "desktop-1920", use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } } },
-    { name: "lobby-problem-1714", use: { ...devices["Desktop Chrome"], viewport: { width: 1714, height: 895 } } },
-    { name: "laptop-1366", use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } } },
-    { name: "small-laptop-1280", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
-    { name: "tablet-landscape", use: { ...devices["Desktop Chrome"], viewport: { width: 1180, height: 820 } } },
-    { name: "tablet-portrait", use: { ...devices["Desktop Chrome"], viewport: { width: 820, height: 1180 } } },
-    { name: "mobile-portrait", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
-    { name: "mobile-landscape", use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
+    { name: "functional-desktop", testMatch: /(?:phaser-smoke|multiplayer|open-world|perks|admin|performance)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
+    { name: "functional-mobile", testMatch: /mobile-gameplay\.spec\.ts/, use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } } },
+    { name: "desktop-1920", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } } },
+    { name: "lobby-problem-1714", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1714, height: 895 } } },
+    { name: "laptop-1366", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } } },
+    { name: "small-laptop-1280", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
+    { name: "tablet-landscape", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1180, height: 820 } } },
+    { name: "tablet-portrait", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 820, height: 1180 } } },
+    { name: "mobile-portrait", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
+    { name: "mobile-landscape", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
   ],
-  webServer: {
-    command: "npm run dev -- --port 5173 --host 127.0.0.1",
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-  },
+  webServer: process.env.E2E_BASE_URL ? undefined : [
+    {
+      command: "npm --prefix ../worker run dev:e2e",
+      url: LOCAL_WORKER_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+    {
+      command: "npm run dev -- --port 5173 --host 127.0.0.1",
+      url: BASE_URL,
+      env: { VITE_BACKEND_ORIGIN: LOCAL_WORKER_URL },
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+  ],
 });
