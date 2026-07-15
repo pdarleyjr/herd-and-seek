@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LocalSoccerBridge } from "./LocalSoccerBridge";
+import { LocalSoccerBridge, quickPlayMovementSpeed } from "./LocalSoccerBridge";
 
 function createBridge(): LocalSoccerBridge {
   return new LocalSoccerBridge({
@@ -39,6 +39,11 @@ describe("LocalSoccerBridge", () => {
     const captain = state.players.find((player) => player.id === "captain");
     expect(captain?.x).toBeGreaterThan(start?.x ?? 0);
     expect(Math.hypot(state.ball.vx, state.ball.vy)).toBeGreaterThan(0);
+  });
+
+  it("gives the Quick Play human an eight percent movement edge over AI", () => {
+    expect(quickPlayMovementSpeed(false, false) / quickPlayMovementSpeed(true, false)).toBeCloseTo(1.08, 5);
+    expect(quickPlayMovementSpeed(false, true) / quickPlayMovementSpeed(true, true)).toBeCloseTo(1.08, 5);
   });
 
   it("replays from a fresh regulation snapshot", () => {

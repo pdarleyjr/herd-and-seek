@@ -20,6 +20,7 @@ export interface ReactToPhaserEvents {
   QUALITY_CHANGED: { tier: QualityTier };
   AUDIO_CHANGED: { muted: boolean; volume: number };
   PAUSE_CHANGED: { paused: boolean };
+  CONTROL_MOVE: { x: number; y: number };
   CONNECTION_CHANGED: { status: ConnectionStatus };
 }
 

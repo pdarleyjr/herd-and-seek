@@ -5,6 +5,8 @@ import { OpenWorldScene } from "../game-engine/scenes/OpenWorldScene";
 import type { ContextAction } from "./openWorldControls";
 import type { OpenWorldProfile, OpenWorldZoneState, QuestId, QuestProgress } from "./openWorldTypes";
 import { gameAudio } from "../game-engine/systems/AudioSystem";
+import TouchJoystick from "../components/TouchJoystick";
+import { useControlSettings } from "../components/useControlSettings";
 
 interface OpenWorldPhaserProps {
   userId: string;
@@ -25,13 +27,12 @@ export default function OpenWorldPhaser(props: OpenWorldPhaserProps) {
   const gameRef = useRef<Phaser.Game | null>(null);
   const [prompt, setPrompt] = useState<ContextAction | null>(null);
   const [bridge] = useState(() => new OpenWorldBridge(runtimeFrom(props)));
-  const joystickOrigin = useRef<{ x: number; y: number } | null>(null);
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const controlSettings = useControlSettings();
 
   useEffect(() => {
     if (!hostRef.current || gameRef.current) return;
     gameRef.current = new Phaser.Game({
-      type: Phaser.AUTO,
+      type: Phaser.CANVAS,
       parent: hostRef.current,
       width: hostRef.current.clientWidth || 1280,
       height: hostRef.current.clientHeight || 720,
@@ -71,21 +72,8 @@ export default function OpenWorldPhaser(props: OpenWorldPhaserProps) {
   useEffect(() => { bridge.updateRuntime(runtimeFrom(props)); }, [bridge, props]);
   useEffect(() => { bridge.setSnapshot({ zoneState: props.zoneState, profile: props.profile, questProgress: props.questProgress }); }, [bridge, props.zoneState, props.profile, props.questProgress]);
 
-  const moveJoystick = (clientX: number, clientY: number) => {
-    if (!joystickOrigin.current) return;
-    const dx = clientX - joystickOrigin.current.x;
-    const dy = clientY - joystickOrigin.current.y;
-    const distance = Math.hypot(dx, dy);
-    const magnitude = Math.min(distance, 52);
-    const x = distance ? dx / distance * magnitude : 0;
-    const y = distance ? dy / distance * magnitude : 0;
-    setKnob({ x, y });
-    bridge.setJoystick(x / 52, y / 52);
-  };
-  const releaseJoystick = () => { joystickOrigin.current = null; setKnob({ x: 0, y: 0 }); bridge.setJoystick(0, 0); };
-
   return (
-    <div ref={shellRef} className="open-world-phaser" data-renderer="phaser" data-scene="openWorld"
+    <div ref={shellRef} className="open-world-phaser" data-renderer="phaser" data-scene="openWorld" data-handedness={controlSettings.handedness}
       data-zone-ready={props.zoneState ? "true" : "false"} data-player-count={props.zoneState?.players.length ?? 0}
       data-collectible-count={props.zoneState?.collectibles.length ?? 0} data-action-kind={prompt?.kind ?? "none"}
       data-coins={props.profile?.coins ?? 0}
@@ -93,12 +81,7 @@ export default function OpenWorldPhaser(props: OpenWorldPhaserProps) {
       data-complete-quests={Object.values(props.questProgress).filter((quest) => quest.status === "complete").length}
       data-claimed-quests={Object.values(props.questProgress).filter((quest) => quest.status === "claimed").length}>
       <div ref={hostRef} className="open-world-phaser__host" aria-label="Grand Reserve seamless open world" />
-      <div className="open-world-phaser__joystick" aria-label="Movement joystick"
-        onPointerDown={(event) => { joystickOrigin.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); moveJoystick(event.clientX, event.clientY); }}
-        onPointerMove={(event) => moveJoystick(event.clientX, event.clientY)}
-        onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick} onLostPointerCapture={releaseJoystick}>
-        <span style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }} />
-      </div>
+      <TouchJoystick settings={controlSettings} onMove={(x, y) => bridge.setJoystick(x, y)} className="open-world-phaser__touch-control" />
       {prompt && (
         <button type="button" className="game-button game-button--primary open-world-phaser__action" onClick={() => bridge.triggerAction()} aria-label={prompt.label}>
           <span aria-hidden="true">✦</span>{prompt.label}

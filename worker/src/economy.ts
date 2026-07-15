@@ -36,17 +36,46 @@ export interface CosmeticDef {
   id: string;
   price: number; // in coins
   currency: "coins" | "badges";
+  kind?: "trail" | "nameplate" | "hat" | "hunterTool" | "hunterSkin" | "animalSkin" | "reticle" | "sound" | "utility";
+  species?: string;
 }
+
+export interface LoadoutProfile {
+  hunterTool: string;
+  hunterSkin: string;
+  reticle: string;
+  trail: string;
+  sound: string;
+  animalSkins: Record<string, string>;
+}
+
+export const DEFAULT_LOADOUT: LoadoutProfile = {
+  hunterTool: "tracker_standard",
+  hunterSkin: "ranger_standard",
+  reticle: "reticle_ring",
+  trail: "trail_none",
+  sound: "sound_soft",
+  animalSkins: {},
+};
 
 // Server-authoritative pricing. Mirrored (display only) in app/src/economy.ts.
 export const SHOP_CATALOG: Record<string, CosmeticDef> = {
-  trail_leaf: { id: "trail_leaf", price: 120, currency: "coins" },
-  trail_bubbles: { id: "trail_bubbles", price: 120, currency: "coins" },
-  trail_dust: { id: "trail_dust", price: 120, currency: "coins" },
+  trail_leaf: { id: "trail_leaf", price: 120, currency: "coins", kind: "trail" },
+  trail_bubbles: { id: "trail_bubbles", price: 120, currency: "coins", kind: "trail" },
+  trail_dust: { id: "trail_dust", price: 120, currency: "coins", kind: "trail" },
   nameplate_bronze: { id: "nameplate_bronze", price: 200, currency: "coins" },
   nameplate_gold: { id: "nameplate_gold", price: 600, currency: "coins" },
   hat_safari: { id: "hat_safari", price: 350, currency: "coins" },
   crown_prestige: { id: "crown_prestige", price: 3, currency: "badges" },
+  tool_tranquilizer: { id: "tool_tranquilizer", price: 420, currency: "coins", kind: "hunterTool" },
+  tool_seedburst: { id: "tool_seedburst", price: 520, currency: "coins", kind: "hunterTool" },
+  hunter_skin_moonfern: { id: "hunter_skin_moonfern", price: 360, currency: "coins", kind: "hunterSkin" },
+  reticle_sunring: { id: "reticle_sunring", price: 180, currency: "coins", kind: "reticle" },
+  shot_trail_firefly: { id: "shot_trail_firefly", price: 260, currency: "coins", kind: "trail" },
+  tool_sound_soft: { id: "tool_sound_soft", price: 140, currency: "coins", kind: "sound" },
+  skin_rabbit_moonfern: { id: "skin_rabbit_moonfern", price: 260, currency: "coins", kind: "animalSkin", species: "rabbit" },
+  skin_bear_honeyguard: { id: "skin_bear_honeyguard", price: 300, currency: "coins", kind: "animalSkin", species: "bear" },
+  skin_zebra_sunstripe: { id: "skin_zebra_sunstripe", price: 300, currency: "coins", kind: "animalSkin", species: "zebra" },
   // Open-world consumables (utility sidegrades — never competitive pay-to-win).
   ow_speed_boost: { id: "ow_speed_boost", price: 150, currency: "coins" },
   ow_reveal: { id: "ow_reveal", price: 100, currency: "coins" },
@@ -74,6 +103,7 @@ export function newProfile(userId: string, username: string) {
     badges: 0,
     ownedCosmetics: [] as string[],
     selectedCosmetic: null as string | null,
+    loadout: { ...DEFAULT_LOADOUT, animalSkins: {} } as LoadoutProfile,
     unlockedAbilities: [] as string[],
     questProgress: {} as Record<string, unknown>,
     dailyQuestDate: "",
@@ -82,6 +112,7 @@ export function newProfile(userId: string, username: string) {
       lastX: 3000,
       lastY: 3000,
       discoveredZones: [] as string[],
+      discoveredDistricts: ["lodge"] as string[],
       collectedNodeIds: [] as string[],
     },
     stats: {
@@ -158,6 +189,7 @@ export interface ProfileLike {
   level: number;
   ownedCosmetics: string[];
   selectedCosmetic: string | null;
+  loadout?: LoadoutProfile;
   isAdmin: boolean;
   updatedAt: number;
   economyLedger: EconomyLedgerEntry[];
@@ -236,6 +268,37 @@ export function applySelect(profile: ProfileLike, cosmeticId: string | null): bo
     return true;
   }
   return false;
+}
+
+export type LoadoutSelection =
+  | { slot: "hunterTool" | "hunterSkin" | "reticle" | "trail" | "sound"; itemId: string }
+  | { slot: "animalSkin"; species: string; itemId: string };
+
+export function ensureProfileDefaults<T extends ProfileLike>(profile: T): T {
+  const existing = profile.loadout;
+  profile.loadout = {
+    ...DEFAULT_LOADOUT,
+    ...(existing ?? {}),
+    animalSkins: { ...(existing?.animalSkins ?? {}) },
+  };
+  return profile;
+}
+
+// Loadout selection changes presentation only. Every non-default item is
+// ownership-gated and species skins are validated against catalog metadata.
+export function applySelectLoadout(profile: ProfileLike, selection: LoadoutSelection): boolean {
+  ensureProfileDefaults(profile);
+  const item = SHOP_CATALOG[selection.itemId];
+  if (!item || !profile.ownedCosmetics.includes(selection.itemId)) return false;
+  if (selection.slot === "animalSkin") {
+    if (item.kind !== "animalSkin" || item.species !== selection.species) return false;
+    profile.loadout!.animalSkins[selection.species] = selection.itemId;
+  } else {
+    if (item.kind !== selection.slot) return false;
+    profile.loadout![selection.slot] = selection.itemId;
+  }
+  profile.updatedAt = Date.now();
+  return true;
 }
 
 export interface AdminGrantBody {

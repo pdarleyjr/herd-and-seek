@@ -1,0 +1,7 @@
+.lobby-level-button { background: #ffd45c; }
+
+@media (max-width: 620px) {
+  .lobby-v2 .lobby-admin-button,
+  .lobby-v2 .lobby-level-button { display: block; min-width: 3.25rem; padding-inline: .45rem; }
+  .lobby-controls-button { display: none; }
+}

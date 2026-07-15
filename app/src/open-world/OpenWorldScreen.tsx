@@ -1,7 +1,10 @@
 import { lazy, Suspense, useState } from "react";
 import { useOpenWorldSocket } from "./useOpenWorldSocket";
 import { QUEST_CATALOG } from "./questCatalog";
+import { DISTRICTS } from "./openWorldTypes";
 import AudioControls from "../components/AudioControls";
+import ControlSettingsPanel from "../components/ControlSettingsPanel";
+import "./openWorldEnhancements.css";
 import "./openWorldPhaser.css";
 
 const OpenWorldPhaser = lazy(() => import("./OpenWorldPhaser"));
@@ -16,6 +19,7 @@ interface OpenWorldScreenProps {
 export default function OpenWorldScreen({ userId, username, animalType, onExit }: OpenWorldScreenProps) {
   const ow = useOpenWorldSocket({ userId, username, animalType });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
 
   const profile = ow.profile;
   const questProgress = ow.questProgress;
@@ -100,6 +104,8 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
         {/* Right: profile + quest toggle */}
         <div className="pointer-events-auto flex items-center gap-2 shrink-0">
           <AudioControls compact />
+          <ControlSettingsPanel />
+          <button type="button" onClick={() => setMapOpen(true)} className="game-button shrink-0" aria-haspopup="dialog">Map</button>
           <div
             className="game-panel flex items-center gap-3 px-3 py-2"
             aria-live="polite"
@@ -128,6 +134,34 @@ export default function OpenWorldScreen({ userId, username, animalType, onExit }
           </button>
         </div>
       </div>
+
+      {ow.zoneState?.activeWorldEvent && (
+        <div className="open-world-event-banner" role="status" aria-live="polite">
+          <small>Live world event</small>
+          <strong>{ow.zoneState.activeWorldEvent.title}</strong>
+          <span>{ow.zoneState.activeWorldEvent.description}</span>
+        </div>
+      )}
+
+      {mapOpen && (
+        <div className="open-world-map-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setMapOpen(false); }}>
+          <section className="open-world-map" role="dialog" aria-modal="true" aria-labelledby="reserve-map-title">
+            <header><div><small>Grand Reserve</small><h2 id="reserve-map-title">District map</h2></div><button type="button" onClick={() => setMapOpen(false)}>Close</button></header>
+            <div className="open-world-map__canvas" aria-label="Map of seven connected districts">
+              {DISTRICTS.map((district) => {
+                const unlocked = profile?.openWorld.discoveredDistricts?.includes(district.id) ?? district.id === "lodge";
+                return <button key={district.id} type="button" className={unlocked ? "is-unlocked" : "is-locked"}
+                  style={{ left: `${district.cx / 60}%`, top: `${district.cy / 60}%` }} disabled={!unlocked}
+                  onClick={() => { ow.fastTravel(district.id); setMapOpen(false); }}
+                  aria-label={`${district.name}, ${unlocked ? "discovered, fast travel" : "not discovered"}`}>
+                  <b>{unlocked ? district.name : "Undiscovered"}</b><span>{unlocked ? "Fast travel" : "Explore to unlock"}</span>
+                </button>;
+              })}
+            </div>
+            <p>{profile?.openWorld.discoveredDistricts?.length ?? 1} of {DISTRICTS.length} districts discovered · travel unlocks only after server-verified exploration.</p>
+          </section>
+        </div>
+      )}
 
       {/* Reward toasts (live) */}
       <div className="absolute z-20 top-20 right-3 space-y-1 pointer-events-none" aria-live="polite">

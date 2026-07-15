@@ -1,6 +1,16 @@
 # Herd & Seek — Seamless World Expansion Specification
 
-Status: implementation baseline for the July 2026 world, interface, audio, networking, animation, and soccer expansion.
+Status: implemented and release-verified for the July 2026 tablet-first world, interface, audio, networking, animation, and soccer expansion.
+
+## July 2026 implementation record
+
+This release extends the existing 6,000×6,000 seamless reserve rather than replacing it with a second world. It adds a server-authenticated daily district event, discovery-based fast travel, reconnect-safe position recovery, bounded client rendering budgets, and organic held-state ambient herds. All reward, travel, room, loadout, and match decisions remain authoritative in the Worker Durable Objects.
+
+The tablet gameplay pass adds a shared DOM control layer for hunt, open-world, and soccer scenes. It supports fixed or floating joystick placement, left- or right-handed layouts, scale and opacity preferences, pointer capture and cancellation, keyboard input, and gamepad input. Preferences persist locally, while loss of focus, orientation changes, and pointer cancellation always clear movement and actions.
+
+Solo play now defaults to a clearly explained Beginner tier with spawn protection, short bot sight, delayed reactions, intentional misses, limited ranger ammunition, and acceleration-based animal movement. NPCs use persistent intent states instead of changing direction every frame. Easy, Medium, and Hard retain progressively steeper reaction, sight, resource, and movement tuning.
+
+The release also adds a lobby Levels entry, a visible authenticated Admin entry with explicit logout, fictional cosmetic hunter tools and species-safe animal skins, `HSR-` room codes, and a production health release marker. The admin passphrase is a deployment secret and is never stored in source, client bundles, tests, logs, or this specification.
 
 ## Product direction
 
@@ -138,7 +148,7 @@ Shared shape rules: 3–5 px dark outlines, 12–24 px radii, offset hard shadow
 ### Technical specification
 
 - A dedicated Phaser activity scene uses a deterministic fixed-step rules core for responsive top-down collision, damping, wall/goal interaction, possession impulses, and reset after scoring.
-- Team setup supports Coral and Teal selection. The same command/snapshot bridge runs local AI play or an authoritative multiplayer Durable Object.
+- Team setup supports the readable Ranger Squad and Wild Herd identities. The compatible wire format retains the internal coral/teal identifiers, while all player-facing setup, HUD, and result copy uses the role names. The same command/snapshot bridge runs local AI play or an authoritative multiplayer Durable Object.
 - AI opponents choose attack, support, mark, intercept, and goalkeeper behaviors using distance and ball trajectory heuristics.
 - Match loop: kickoff, regulation timer, scoring, reset, final result. HUD shows team, score, clock, stamina/action prompt, and exit.
 - Visual language uses the shared block-animal silhouettes, palette, outlines, pitch landmarks, responsive crowd motion, ball trail, and goal celebration.
@@ -146,7 +156,15 @@ Shared shape rules: 3–5 px dark outlines, 12–24 px radii, offset hard shadow
 ### Acceptance criteria
 
 - Ball momentum, friction, kick impulse, goal detection, score, reset, AI pressure, and full-time state are covered by deterministic rule tests.
-- Both teams are selectable; local input supports keyboard and touch bridge commands.
+- Both teams are selectable; local input supports keyboard, touch, and gamepad bridge commands. Quick Play gives only the human-controlled character an 8% movement advantage; multiplayer remains speed-equal and server-authoritative.
+
+## Release gates
+
+- App: lint, unit/integration tests, production build, full multi-project Playwright suite, tablet Chromium, and tablet WebKit.
+- Worker: TypeScript validation, unit/integration tests, room-directory authorization, profile migration/loadout validation, open-world event/travel validation, and soccer authority tests.
+- Performance: tablet browser gameplay must hold a 30 FPS one-percent-low floor under the automated software-rendering test, with quality-tier caps on props, foliage, particles, and ambient NPCs.
+- Accessibility: 44 px touch targets, visible focus, semantic dialogs, safe-area padding, reduced-motion behavior, and non-color-only role/state labels.
+- Production: Worker health/release response, directory HTTP responses, authenticated room WebSocket upgrade, Pages navigation, admin login/logout, and tablet browser gameplay smoke.
 
 ## Delivery and verification sequence
 

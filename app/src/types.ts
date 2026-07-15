@@ -111,6 +111,8 @@ export interface PlayerState {
   perkActiveUntil?: number;
   perkCooldownUntil?: number;
   perkConsumed?: boolean;
+  protectedUntil?: number;
+  aiState?: "idle" | "graze" | "wander" | "investigate" | "socialize" | "flee" | "hide" | "rest" | "returnToHerd";
 }
 
 export interface ReadyPayload {
@@ -171,6 +173,9 @@ export interface SerializedState {
   hostUserId?: string | null;
   maxPlayers?: number;
   countdownEndsAt?: number | null;
+  soloDifficulty?: SoloDifficulty;
+  aiSightRange?: number;
+  serverTime?: number;
 }
 
 export interface StartSoloPayload {
@@ -179,7 +184,7 @@ export interface StartSoloPayload {
   difficulty?: SoloDifficulty;
 }
 
-export type SoloDifficulty = "easy" | "normal" | "hard";
+export type SoloDifficulty = "beginner" | "easy" | "normal" | "hard";
 
 export interface AnimalDef {
   value: AnimalType;
@@ -412,6 +417,7 @@ export type ClientMessage =
   | { type: "LEAVE_ROOM" }
   | { type: "CLOSE_ROOM" }
   | { type: "ADMIN_AUTH"; payload: { adminKey: string } }
+  | { type: "ADMIN_LOGOUT" }
   | {
       type: "ADMIN_CMD";
       payload: {

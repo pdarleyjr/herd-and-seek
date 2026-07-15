@@ -48,6 +48,7 @@ export interface OpenWorldProfile {
     lastX: number;
     lastY: number;
     discoveredZones: ZoneId[];
+    discoveredDistricts: DistrictId[];
     collectedNodeIds: string[];
   };
   stats: Record<string, number>;
@@ -97,6 +98,8 @@ export interface WorldEvent {
   description: string;
   endsAt: number;
   rewardMultiplier?: number;
+  districtId: DistrictId;
+  kind: "migration" | "supplyRush" | "moonfernBloom";
 }
 
 export interface OpenWorldZoneState {
@@ -116,6 +119,7 @@ export type OpenWorldClientMessage =
   | { type: "QUEST_ACCEPT"; payload: { questId: QuestId } }
   | { type: "QUEST_PROGRESS"; payload: { questId: QuestId; amount: number; evidence?: unknown } }
   | { type: "QUEST_CLAIM"; payload: { questId: QuestId } }
+  | { type: "FAST_TRAVEL"; payload: { districtId: DistrictId } }
   | { type: "COLLECT_NODE"; payload: { nodeId: string } };
 
 // ── Protocol (server -> client) ──────────────────────────────────────────────

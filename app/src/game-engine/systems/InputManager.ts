@@ -8,6 +8,8 @@ export class InputManager {
   private touchOrigin = { x: 0, y: 0 };
   private touchVector = { x: 0, y: 0 };
   private readonly pressedCodes = new Set<string>();
+  private gamepadPerkDown = false;
+  private gamepadFireDown = false;
   private readonly resetBound = () => this.reset();
   private readonly nativeKeyDown = (event: KeyboardEvent) => {
     if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyE"].includes(event.code)) {
@@ -35,6 +37,7 @@ export class InputManager {
     scene.input.on("pointermove", this.onPointerMove, this);
     scene.input.on("pointerup", this.onPointerUp, this);
     scene.input.on("pointerupoutside", this.onPointerUp, this);
+    scene.input.on("pointercancel", this.onPointerUp, this);
     window.addEventListener("blur", this.resetBound);
     window.addEventListener("keydown", this.nativeKeyDown);
     window.addEventListener("keyup", this.nativeKeyUp);
@@ -46,17 +49,38 @@ export class InputManager {
       - (this.cursors.left.isDown || this.keys.left.isDown || this.pressedCodes.has("KeyA") || this.pressedCodes.has("ArrowLeft") ? 1 : 0);
     const keyboardY = (this.cursors.down.isDown || this.keys.down.isDown || this.pressedCodes.has("KeyS") || this.pressedCodes.has("ArrowDown") ? 1 : 0)
       - (this.cursors.up.isDown || this.keys.up.isDown || this.pressedCodes.has("KeyW") || this.pressedCodes.has("ArrowUp") ? 1 : 0);
-    return keyboardX || keyboardY ? { x: keyboardX, y: keyboardY } : { ...this.touchVector };
+    if (keyboardX || keyboardY) return { x: keyboardX, y: keyboardY };
+    const gamepad = this.gamepad();
+    const gamepadX = deadzone(gamepad?.axes[0] ?? 0);
+    const gamepadY = deadzone(gamepad?.axes[1] ?? 0);
+    return gamepadX || gamepadY ? { x: gamepadX, y: gamepadY } : { ...this.touchVector };
   }
 
   perkJustPressed(): boolean {
-    return Phaser.Input.Keyboard.JustDown(this.keys.perk);
+    const down = Boolean(this.gamepad()?.buttons[0]?.pressed);
+    const edge = down && !this.gamepadPerkDown;
+    this.gamepadPerkDown = down;
+    return Phaser.Input.Keyboard.JustDown(this.keys.perk) || edge;
+  }
+
+  fireJustPressed(): boolean {
+    const down = Boolean(this.gamepad()?.buttons[7]?.pressed);
+    const edge = down && !this.gamepadFireDown;
+    this.gamepadFireDown = down;
+    return edge;
+  }
+
+  aimVector(): Vector2Like {
+    const gamepad = this.gamepad();
+    return { x: deadzone(gamepad?.axes[2] ?? 0), y: deadzone(gamepad?.axes[3] ?? 0) };
   }
 
   reset(): void {
     this.touchPointerId = null;
     this.touchVector = { x: 0, y: 0 };
     this.pressedCodes.clear();
+    this.gamepadPerkDown = false;
+    this.gamepadFireDown = false;
     for (const key of Object.values(this.keys)) key.reset();
     for (const key of Object.values(this.cursors)) key?.reset?.();
   }
@@ -66,6 +90,7 @@ export class InputManager {
     this.scene.input.off("pointermove", this.onPointerMove, this);
     this.scene.input.off("pointerup", this.onPointerUp, this);
     this.scene.input.off("pointerupoutside", this.onPointerUp, this);
+    this.scene.input.off("pointercancel", this.onPointerUp, this);
     window.removeEventListener("blur", this.resetBound);
     window.removeEventListener("keydown", this.nativeKeyDown);
     window.removeEventListener("keyup", this.nativeKeyUp);
@@ -93,4 +118,15 @@ export class InputManager {
     this.touchPointerId = null;
     this.touchVector = { x: 0, y: 0 };
   }
+
+  private gamepad(): Gamepad | null {
+    if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return null;
+    return [...navigator.getGamepads()].find((candidate): candidate is Gamepad => Boolean(candidate?.connected)) ?? null;
+  }
+}
+
+function deadzone(value: number): number {
+  const magnitude = Math.abs(value);
+  if (magnitude < 0.16) return 0;
+  return Math.sign(value) * Math.min(1, (magnitude - 0.16) / 0.84);
 }

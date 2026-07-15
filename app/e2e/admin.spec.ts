@@ -14,4 +14,7 @@ test("lobby Admin button opens the server-authorized control panel", async ({ pa
   await page.getByRole("button", { name: /Unlock/i }).click();
   await expect(page.getByRole("heading", { name: /Admin Panel/i })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: /Force Start/i })).toBeVisible();
+  await page.getByRole("button", { name: /Log out/i }).click();
+  await expect(page.getByRole("heading", { name: /Admin Panel/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Admin$/i })).toBeVisible();
 });

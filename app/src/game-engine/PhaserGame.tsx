@@ -5,9 +5,14 @@ import { GameBridge } from "./GameBridge";
 import { createGameConfig } from "./gameConfig";
 import type { GameSceneVariant } from "./scenes/PreloadScene";
 import type { QualityTier } from "./types";
+import { recommendQuality } from "./systems/QualityManager";
 import { gameAudio } from "./systems/AudioSystem";
 import AudioControls from "../components/AudioControls";
+import ControlSettingsPanel from "../components/ControlSettingsPanel";
+import { useControlSettings } from "../components/useControlSettings";
+import TouchJoystick from "../components/TouchJoystick";
 import "./game.css";
+import "./gameEnhancements.css";
 
 export interface PhaserGameProps {
   variant?: GameSceneVariant;
@@ -39,8 +44,9 @@ export default function PhaserGame({
   const hostRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
-  const [bridge] = useState(() => new GameBridge({ userId, username, send, localPosition: localPosRef }));
-  const [quality, setQuality] = useState<QualityTier>("balanced");
+  const [quality, setQuality] = useState<QualityTier>(() => recommendQuality(window.devicePixelRatio || 1, navigator.hardwareConcurrency || 4));
+  const [bridge] = useState(() => new GameBridge({ userId, username, send, localPosition: localPosRef }, quality));
+  const controlSettings = useControlSettings();
 
   useEffect(() => {
     if (!hostRef.current || gameRef.current) return;
@@ -111,8 +117,8 @@ export default function PhaserGame({
       data-decoy-owner={decoySpawn?.ownerId ?? ""}>
       <div ref={hostRef} className="phaser-host" aria-label={`${variant} game world`} />
       {variant === "match" && (
-        <div className="game-control-layer" aria-label="Gameplay controls">
-          <div className="touch-joystick-guide" aria-hidden="true"><span /></div>
+        <div className="game-control-layer" aria-label="Gameplay controls" data-handedness={controlSettings.handedness}>
+          <TouchJoystick settings={controlSettings} onMove={(x, y) => bridge.events.emit("CONTROL_MOVE", { x, y })} />
           {localPlayer?.isHunter && (
             <button className="game-action game-action--fire" type="button" aria-label="Fire at reticle"
               onPointerDown={(event) => { event.preventDefault(); bridge.events.emit("SHOOT", { targetX: localPosRef.current.x + 120, targetY: localPosRef.current.y }); }}>
@@ -130,6 +136,7 @@ export default function PhaserGame({
       {variant === "match" && (
         <AudioControls compact className="audio-picker" />
       )}
+      {variant === "match" && <ControlSettingsPanel className="game-controls-settings" />}
       {variant === "match" && (
         <label className="quality-picker">
           <span>Graphics</span>

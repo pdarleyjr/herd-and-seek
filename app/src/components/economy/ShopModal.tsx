@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { PlayerProfile } from "../../economy";
 import { SHOP_ITEMS } from "../../economy";
-import { purchaseCosmetic, selectCosmetic } from "../../profileService";
+import { purchaseCosmetic, selectCosmetic, selectLoadout } from "../../profileService";
 
 interface ShopModalProps {
   userId: string;
@@ -49,6 +49,26 @@ export default function ShopModal({
     setBusy(null);
   };
 
+  const handleLoadoutEquip = async (item: (typeof SHOP_ITEMS)[number]) => {
+    setBusy(item.id);
+    setMessage(null);
+    const selection = item.kind === "animalSkin"
+      ? { slot: "animalSkin" as const, species: item.species!, itemId: item.id }
+      : { slot: item.kind as "hunterTool" | "hunterSkin" | "reticle" | "trail" | "sound", itemId: item.id };
+    const next = await selectLoadout(userId, username, selection);
+    if (next) onProfileChange(next); else setMessage("Could not equip that item.");
+    setBusy(null);
+  };
+
+  const isLoadoutItem = (kind: (typeof SHOP_ITEMS)[number]["kind"]) => ["hunterTool", "hunterSkin", "animalSkin", "reticle", "sound"].includes(kind);
+  const isEquipped = (item: (typeof SHOP_ITEMS)[number]) => {
+    if (!profile?.loadout) return false;
+    if (item.kind === "animalSkin") return profile.loadout.animalSkins[item.species!] === item.id;
+    if (item.kind === "hunterTool" || item.kind === "hunterSkin" || item.kind === "reticle" || item.kind === "sound") return profile.loadout[item.kind] === item.id;
+    if (item.kind === "trail" && item.id === "shot_trail_firefly") return profile.loadout.trail === item.id;
+    return selected === item.id;
+  };
+
   return (
     <div
       className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
@@ -61,7 +81,7 @@ export default function ShopModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[#f5d07a] font-extrabold text-lg sm:text-xl">Cosmetics Shop</h2>
+          <div><p className="text-[#fd8083] text-[10px] font-black uppercase tracking-widest">Field collection</p><h2 className="text-[#f5d07a] font-extrabold text-lg sm:text-xl">Tools, Skins & Style</h2></div>
           <div className="flex items-center gap-3 text-sm font-bold">
             <span className="text-[#f5d07a]">🪙 {(profile?.coins ?? 0).toLocaleString()}</span>
             <span className="text-[#ffd86a]">🎖 {(profile?.badges ?? 0).toLocaleString()}</span>
@@ -82,7 +102,7 @@ export default function ShopModal({
         <div className="grid grid-cols-2 gap-2.5">
           {SHOP_ITEMS.map((item) => {
             const isOwned = owned.has(item.id);
-            const isSelected = selected === item.id;
+            const isSelected = isEquipped(item);
             return (
               <div
                 key={item.id}
@@ -107,7 +127,7 @@ export default function ShopModal({
                   {isOwned ? (
                     <button
                       disabled={busy !== null}
-                      onClick={() => handleEquip(isSelected ? null : item.id)}
+                      onClick={() => isLoadoutItem(item.kind) || item.id === "shot_trail_firefly" ? handleLoadoutEquip(item) : handleEquip(isSelected ? null : item.id)}
                       className="px-2 py-1 rounded-lg text-[11px] font-bold active:scale-95 select-none"
                       style={{
                         background: isSelected ? "#7fff00" : "#3a5a1a",
@@ -115,7 +135,7 @@ export default function ShopModal({
                         touchAction: "manipulation",
                       }}
                     >
-                      {isSelected ? "Equipped" : "Equip"}
+                      {isSelected ? "Equipped" : "Owned · Equip"}
                     </button>
                   ) : (
                     <button
@@ -134,7 +154,7 @@ export default function ShopModal({
         </div>
 
         <p className="text-[#6b4a2a] text-[10px] mt-3 text-center">
-          Earn coins & badges by playing matches. Balances are saved to your account.
+          All tools are fictional cosmetic field gear. Purchases and equipped species skins are validated by the server.
         </p>
       </div>
     </div>

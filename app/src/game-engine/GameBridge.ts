@@ -9,8 +9,9 @@ export class GameBridge {
 
   runtime: GameRuntimeContext;
 
-  constructor(runtime: GameRuntimeContext) {
+  constructor(runtime: GameRuntimeContext, quality: QualityTier = "balanced") {
     this.runtime = runtime;
+    this.quality = quality;
     this.bindOutboundEvents();
   }
 

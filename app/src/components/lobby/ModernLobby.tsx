@@ -5,6 +5,8 @@ import type { ConnectionStatus } from "../../types";
 import "./modernLobby.css";
 import "./modernLobbyOverrides.css";
 import AudioControls from "../AudioControls";
+import ControlSettingsPanel from "../ControlSettingsPanel";
+import "./modernLobbyEnhancements.css";
 
 const PhaserGame = lazy(() => import("../../game-engine/PhaserGame"));
 
@@ -69,6 +71,8 @@ export default function ModernLobby(props: ModernLobbyProps) {
         </div>
         <span className="lobby-mode">Multiplayer expedition</span>
         <AudioControls compact className="lobby-audio-controls" />
+        <ControlSettingsPanel className="lobby-controls-button" />
+        <button className="lobby-quiet-button lobby-level-button" type="button" onClick={() => setTab("maps")}>Levels</button>
         <button className="lobby-quiet-button lobby-admin-button" type="button" onClick={onOpenAdmin}>Admin</button>
         <button className="room-ticket" type="button" onClick={copyRoom} aria-label={`Copy room code ${roomCode}`}>
           <small>Room code</small><strong>{roomCode}</strong><span>{copied ? "Copied" : "Copy"}</span>

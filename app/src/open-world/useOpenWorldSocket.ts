@@ -6,6 +6,7 @@ import type {
   OpenWorldProfile,
   QuestProgress,
   QuestId,
+  DistrictId,
   ZoneId,
 } from "./openWorldTypes";
 import { BACKEND_WS_ORIGIN } from "../backend";
@@ -40,6 +41,7 @@ export interface UseOpenWorldSocket {
   collectNode: (nodeId: string) => void;
   acceptQuest: (questId: QuestId) => void;
   claimQuest: (questId: QuestId) => void;
+  fastTravel: (districtId: DistrictId) => void;
   leave: () => void;
 }
 
@@ -73,29 +75,26 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
   useEffect(() => {
     if (!userId || !username) return;
     closedByUs.current = false;
-
-    const url = `${WS_BASE}?zoneId=${encodeURIComponent(zoneId)}&userId=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      // Auto-join with the last saved position if available (server clamps).
-      const last = joinInfo.current;
-      send({
-        type: "OPEN_WORLD_JOIN",
-        payload: {
-          zoneId,
-          userId,
-          username,
-          x: last?.x,
-          y: last?.y,
-          animalType: last?.animalType ?? animalRef.current,
-        },
-      });
-    };
-
-    ws.onmessage = (event) => {
+    let active = true;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    const connect = () => {
+      if (!active || closedByUs.current) return;
+      const current = wsRef.current;
+      if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return;
+      const url = `${WS_BASE}?zoneId=${encodeURIComponent(zoneId)}&userId=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+      ws.onopen = () => {
+        attempts = 0;
+        setConnected(true);
+        const last = joinInfo.current;
+        ws.send(JSON.stringify({
+          type: "OPEN_WORLD_JOIN",
+          payload: { zoneId, userId, username, x: last?.x, y: last?.y, animalType: last?.animalType ?? animalRef.current },
+        } satisfies OpenWorldClientMessage));
+      };
+      ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string) as OpenWorldServerMessage;
         switch (msg.type) {
@@ -122,20 +121,33 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
         /* ignore malformed frames */
       }
     };
-
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
+      ws.onclose = () => {
+        if (wsRef.current === ws) wsRef.current = null;
+        setConnected(false);
+        if (!active || closedByUs.current) return;
+        const delay = Math.min(8_000, 500 * 2 ** Math.min(attempts++, 4));
+        reconnectTimer = setTimeout(connect, delay);
+      };
+      ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
     };
+    const reconnectNow = () => {
+      if (!active || closedByUs.current || document.hidden) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, 0);
+    };
+    connect();
+    window.addEventListener("online", reconnectNow);
+    document.addEventListener("visibilitychange", reconnectNow);
 
     return () => {
+      active = false;
       closedByUs.current = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      window.removeEventListener("online", reconnectNow);
+      document.removeEventListener("visibilitychange", reconnectNow);
+      const ws = wsRef.current;
       try {
-        ws.close();
+        ws?.close();
       } catch {
         /* ignore */
       }
@@ -152,8 +164,9 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
   );
 
   const sync = useCallback((x: number, y: number, animalType?: string) => {
+    joinInfo.current = { zoneId, userId, username, x, y, animalType: animalType ?? animalRef.current };
     send({ type: "OPEN_WORLD_SYNC", payload: { x, y, animalType } });
-  }, [send]);
+  }, [send, userId, username, zoneId]);
 
   const collectNode = useCallback((nodeId: string) => {
     send({ type: "COLLECT_NODE", payload: { nodeId } });
@@ -165,6 +178,10 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
 
   const claimQuest = useCallback((questId: QuestId) => {
     send({ type: "QUEST_CLAIM", payload: { questId } });
+  }, [send]);
+
+  const fastTravel = useCallback((districtId: DistrictId) => {
+    send({ type: "FAST_TRAVEL", payload: { districtId } });
   }, [send]);
 
   const leave = useCallback(() => {
@@ -184,6 +201,7 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
     collectNode,
     acceptQuest,
     claimQuest,
+    fastTravel,
     leave,
   };
 }

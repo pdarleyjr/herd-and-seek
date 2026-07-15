@@ -31,6 +31,13 @@ interface ControllerState {
   kick?: { target: SoccerVector; power: number };
 }
 
+export const QUICK_PLAY_HUMAN_SPEED_MULTIPLIER = 1.08;
+
+export function quickPlayMovementSpeed(isAi: boolean, sprinting: boolean): number {
+  const base = sprinting ? SPRINT_SPEED : PLAYER_SPEED;
+  return isAi ? base : base * QUICK_PLAY_HUMAN_SPEED_MULTIPLIER;
+}
+
 export class LocalSoccerBridge implements SoccerBridge {
   readonly localPlayerId: string;
   private snapshot: SoccerMatchSnapshot;
@@ -189,7 +196,7 @@ export class LocalSoccerBridge implements SoccerBridge {
     controller ??= { move: { x: 0, y: 0 }, sprint: false };
     const movement = normalizeMove(controller.move);
     const sprinting = controller.sprint && player.energy > 0.04;
-    const speed = sprinting ? SPRINT_SPEED : PLAYER_SPEED;
+    const speed = quickPlayMovementSpeed(player.isAi, sprinting);
     const energy = clamp(player.energy + (sprinting ? -0.24 : 0.14) * dt, 0, 1);
     const vx = movement.x * speed;
     const vy = movement.y * speed;

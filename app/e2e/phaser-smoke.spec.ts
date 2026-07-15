@@ -20,7 +20,8 @@ test("Solo Forest boots one Phaser instance and reaches playable state", async (
   const durationSelect = page.getByLabel(/Solo round length/i);
   await durationSelect.selectOption("30");
   await expect(durationSelect).toHaveValue("30");
-  await page.getByRole("button", { name: /Start solo expedition/i }).click();
+  await page.getByRole("button", { name: /Review expedition/i }).click();
+  await page.getByRole("button", { name: /Start expedition/i }).click();
 
   const world = page.locator('[data-renderer="phaser"][data-scene="match"]');
   await expect(world).toBeVisible({ timeout: 20_000 });
@@ -44,7 +45,8 @@ for (const biome of [
     await page.getByRole("button", { name: /^Animal/i }).click();
     await page.getByRole("button", { name: biome.button }).click();
     await page.getByLabel(/Solo round length/i).selectOption("30");
-    await page.getByRole("button", { name: /Start solo expedition/i }).click();
+    await page.getByRole("button", { name: /Review expedition/i }).click();
+    await page.getByRole("button", { name: /Start expedition/i }).click();
     const world = page.locator('[data-renderer="phaser"][data-scene="match"]');
     await expect(world).toHaveAttribute("data-phase", "PLAYING", { timeout: 20_000 });
     await expect(world.locator("canvas")).toHaveCount(1);
