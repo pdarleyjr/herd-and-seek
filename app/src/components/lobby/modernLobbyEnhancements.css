@@ -1,7 +1,57 @@
 .lobby-level-button { background: #ffd45c; }
 
+/* iPad landscape and scaled laptop windows need a focused panel rather than
+   three narrow desktop columns. All three setup areas remain one tap away. */
+@media (max-width: 1199px) {
+  .lobby-v2 { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .lobby-v2__header { min-height: 3.8rem; gap: .45rem; }
+  .lobby-mode, .connection-chip, .lobby-quiet-button--danger { display: none; }
+  .room-ticket { margin-left: auto; }
+  .profile-stamp { margin-left: 0; }
+  .lobby-mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    padding: .35rem;
+    border-bottom: 4px solid #3b0855;
+    background: #852467;
+  }
+  .lobby-mobile-tabs button {
+    min-height: 44px;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: #fff5de;
+    font-weight: 900;
+  }
+  .lobby-mobile-tabs button.is-active { border-color: #ffd45c; color: #ffd45c; }
+  .lobby-v2__workspace { display: block; min-height: 0; padding: .55rem; }
+  .lobby-panel { display: none; height: 100%; }
+  .lobby-panel.is-mobile-active { display: flex; }
+  .lobby-panel--preview.is-mobile-active { display: grid; }
+  .lobby-v2__footer { grid-template-columns: 1fr minmax(14rem, 32vw); min-height: 5.5rem; }
+  .ready-copy, .roster > div { display: none; }
+  .animal-strip { grid-template-columns: repeat(8, minmax(3.7rem, 1fr)); }
+}
+
+/* On short desktop windows the lists become the scroll owners. This preserves
+   44px targets and avoids shrinking cards into illegibility. */
+@media (min-width: 1200px) and (max-height: 700px) {
+  .lobby-v2__header { min-height: 4rem; }
+  .lobby-v2__workspace { padding: .55rem; padding-top: .7rem; }
+  .lobby-v2__footer { min-height: 5rem; padding-block: .45rem; }
+  .map-stack { overflow-y: auto; overscroll-behavior: contain; padding-right: .2rem; }
+  .map-card { grid-template-columns: 3.45rem 1fr auto; min-height: 4.7rem; }
+  .map-card__art { width: 3.25rem; height: 3.25rem; }
+  .room-brief { margin-top: .45rem; padding-block: .45rem; }
+  .lobby-v2 .perk-stack button { min-height: 3.35rem; }
+  .animal-strip button { min-height: 3.65rem; }
+  .ready-dominant { min-height: 3.8rem; }
+}
+
 @media (max-width: 620px) {
   .lobby-v2 .lobby-admin-button,
   .lobby-v2 .lobby-level-button { display: block; min-width: 3.25rem; padding-inline: .45rem; }
   .lobby-controls-button { display: none; }
+  .lobby-v2__workspace { padding: .4rem; }
+  .lobby-v2__footer { display: block; min-height: auto; }
 }

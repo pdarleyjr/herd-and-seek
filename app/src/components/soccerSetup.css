@@ -7,23 +7,24 @@
   --coral-soft: #fd8083;
   --teal: #30c0b7;
   --teal-deep: #25758a;
-  min-height: 100dvh;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
   overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   position: relative;
   color: var(--ink);
-  background: #f8d6aa;
+  background:
+    radial-gradient(circle at 76% 8%, #fff0ba 0 9%, transparent 28%),
+    linear-gradient(148deg, #ffc1a6 0 37%, #fd8083 37% 57%, #852467 57% 100%);
   font-family: "Trebuchet MS", "Avenir Next", sans-serif;
   isolation: isolate;
 }
 
 .soccer-setup::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -3;
-  background:
-    radial-gradient(circle at 76% 8%, #fff0ba 0 9%, transparent 28%),
-    linear-gradient(148deg, #ffc1a6 0 37%, #fd8083 37% 57%, #852467 57% 100%);
+  content: none;
 }
 
 .soccer-setup__sky { position: fixed; inset: 0; overflow: hidden; z-index: -2; pointer-events: none; }
@@ -153,6 +154,64 @@
   .soccer-stadium { margin-top: -8px; }
   .soccer-setup__options { display: block; }
   .soccer-setup__options fieldset + fieldset { margin-top: 14px; }
+}
+
+/* Laptop browser chrome and display scaling commonly leave 650-850 CSS px of
+   usable height. Recompose the hero as a compact banner so the setup console
+   remains fully visible instead of being clipped by the game shell. */
+@media (min-width: 761px) and (max-height: 850px) {
+  .soccer-setup__topbar {
+    min-height: 62px;
+    padding-block: 8px;
+  }
+
+  .soccer-setup__stage {
+    width: min(1320px, calc(100% - 32px));
+    margin-top: 2px;
+    grid-template-columns: minmax(260px, .75fr) minmax(380px, 1.25fr);
+    gap: clamp(16px, 2.5vw, 34px);
+  }
+
+  .soccer-setup__eyebrow { margin-bottom: 6px; font-size: 11px; }
+  .soccer-setup__copy h1 { font-size: clamp(50px, 9vh, 70px); line-height: .84; }
+  .soccer-setup__copy > p:not(.soccer-setup__eyebrow) { margin: 10px 0; font-size: 14px; line-height: 1.35; }
+  .soccer-setup__match-note p { font-size: 10px; }
+
+  .soccer-stadium {
+    width: min(100%, 620px);
+    justify-self: end;
+  }
+  .soccer-stadium > p { margin-top: -28px; padding-block: 7px; }
+
+  .soccer-setup__console {
+    width: min(1380px, calc(100% - 24px));
+    margin: 8px auto max(10px, env(safe-area-inset-bottom));
+    padding: 13px 16px;
+    gap: 16px;
+    border-radius: 22px;
+  }
+  .soccer-setup legend { margin-bottom: 7px; }
+  .soccer-team { min-height: 98px; padding: 10px; }
+  .soccer-team__crest { width: 48px; height: 54px; }
+  .soccer-choice-row button, .soccer-size-row button { min-height: 72px; padding-block: 8px; }
+  .soccer-setup__start { min-height: 54px; margin-top: 10px; }
+  .soccer-setup__launch > p { display: none; }
+}
+
+@media (min-width: 761px) and (max-height: 700px) {
+  .soccer-setup__topbar { min-height: 56px; padding-block: 5px; }
+  .soccer-setup__league-mark > span { width: 38px; height: 38px; }
+  .soccer-setup__stage { margin-top: 0; }
+  .soccer-setup__copy h1 { font-size: clamp(46px, 9vh, 60px); }
+  .soccer-setup__copy > p:not(.soccer-setup__eyebrow) { margin: 7px 0; font-size: 12px; }
+  .soccer-setup__match-note { display: none; }
+  .soccer-stadium { width: min(100%, 520px); }
+  .soccer-setup__console { margin-top: 5px; padding-block: 10px; }
+  .soccer-team { min-height: 88px; }
+  .soccer-team__copy span { display: none; }
+  .soccer-choice-row button, .soccer-size-row button { min-height: 66px; }
+  .soccer-setup__ticket strong { font-size: 17px; }
+  .soccer-setup__start { min-height: 50px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
