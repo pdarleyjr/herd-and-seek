@@ -12,6 +12,8 @@ import type {
 import { BACKEND_WS_ORIGIN } from "../backend";
 
 const WS_BASE = `${BACKEND_WS_ORIGIN}/open-world`;
+const STALE_SOCKET_MS = 12_000;
+const WATCHDOG_INTERVAL_MS = 4_000;
 
 export interface RewardEvent {
   coins: number;
@@ -77,16 +79,41 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
     closedByUs.current = false;
     let active = true;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let watchdogTimer: ReturnType<typeof setInterval> | null = null;
     let attempts = 0;
-    const connect = () => {
+    let lastFrameAt = Date.now();
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    };
+    const scheduleReconnect = (delay: number) => {
+      clearReconnectTimer();
+      reconnectTimer = setTimeout(() => connect(), delay);
+    };
+    const abandonSocket = (socket: WebSocket | null) => {
+      if (!socket) return;
+      if (wsRef.current === socket) wsRef.current = null;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      try { socket.close(); } catch { /* already unavailable */ }
+      setConnected(false);
+    };
+
+    function connect() {
       if (!active || closedByUs.current) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
       const current = wsRef.current;
       if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return;
       const url = `${WS_BASE}?zoneId=${encodeURIComponent(zoneId)}&userId=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.onopen = () => {
+        if (wsRef.current !== ws) return;
         attempts = 0;
+        lastFrameAt = Date.now();
         setConnected(true);
         const last = joinInfo.current;
         ws.send(JSON.stringify({
@@ -95,63 +122,83 @@ export function useOpenWorldSocket(opts: UseOpenWorldSocketOptions): UseOpenWorl
         } satisfies OpenWorldClientMessage));
       };
       ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data as string) as OpenWorldServerMessage;
-        switch (msg.type) {
-          case "OPEN_WORLD_STATE":
-            setZoneState(msg.payload);
-            break;
-          case "PROFILE_SYNC":
-            setProfile(msg.payload);
-            setQuestProgress(msg.payload.questProgress ?? {});
-            break;
-          case "QUEST_UPDATED":
-            setQuestProgress((prev) => ({ ...prev, [msg.payload.questId]: msg.payload }));
-            break;
-          case "REWARD_GRANTED":
-            setRewards((prev) => [{ ...msg.payload, ts: Date.now() }, ...prev].slice(0, 8));
-            break;
-          case "OPEN_WORLD_ERROR":
-            setError(msg.payload);
-            break;
-          default:
-            break;
+        if (wsRef.current !== ws) return;
+        lastFrameAt = Date.now();
+        try {
+          const msg = JSON.parse(event.data as string) as OpenWorldServerMessage;
+          switch (msg.type) {
+            case "OPEN_WORLD_STATE":
+              setZoneState(msg.payload);
+              break;
+            case "PROFILE_SYNC":
+              setProfile(msg.payload);
+              setQuestProgress(msg.payload.questProgress ?? {});
+              break;
+            case "QUEST_UPDATED":
+              setQuestProgress((prev) => ({ ...prev, [msg.payload.questId]: msg.payload }));
+              break;
+            case "REWARD_GRANTED":
+              setRewards((prev) => [{ ...msg.payload, ts: Date.now() }, ...prev].slice(0, 8));
+              break;
+            case "OPEN_WORLD_ERROR":
+              setError(msg.payload);
+              break;
+            default:
+              break;
+          }
+        } catch {
+          /* ignore malformed frames */
         }
-      } catch {
-        /* ignore malformed frames */
-      }
-    };
+      };
       ws.onclose = () => {
-        if (wsRef.current === ws) wsRef.current = null;
+        if (wsRef.current !== ws) return;
+        wsRef.current = null;
         setConnected(false);
         if (!active || closedByUs.current) return;
         const delay = Math.min(8_000, 500 * 2 ** Math.min(attempts++, 4));
-        reconnectTimer = setTimeout(connect, delay);
+        scheduleReconnect(delay);
       };
-      ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
-    };
+      ws.onerror = () => {
+        if (wsRef.current !== ws) return;
+        abandonSocket(ws);
+        if (!active || closedByUs.current) return;
+        const delay = Math.min(8_000, 500 * 2 ** Math.min(attempts++, 4));
+        scheduleReconnect(delay);
+      };
+    }
     const reconnectNow = () => {
       if (!active || closedByUs.current || document.hidden) return;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(connect, 0);
+      const current = wsRef.current;
+      const stale = current?.readyState === WebSocket.OPEN && Date.now() - lastFrameAt > STALE_SOCKET_MS;
+      if (stale || current?.readyState === WebSocket.CLOSING || current?.readyState === WebSocket.CLOSED) abandonSocket(current);
+      scheduleReconnect(0);
+    };
+    const handleOffline = () => {
+      clearReconnectTimer();
+      abandonSocket(wsRef.current);
     };
     connect();
     window.addEventListener("online", reconnectNow);
+    window.addEventListener("offline", handleOffline);
     document.addEventListener("visibilitychange", reconnectNow);
+    watchdogTimer = setInterval(() => {
+      if (!active || closedByUs.current || document.hidden || navigator.onLine === false) return;
+      const current = wsRef.current;
+      if (current?.readyState === WebSocket.OPEN && Date.now() - lastFrameAt <= STALE_SOCKET_MS) return;
+      abandonSocket(current);
+      scheduleReconnect(0);
+    }, WATCHDOG_INTERVAL_MS);
 
     return () => {
       active = false;
       closedByUs.current = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearReconnectTimer();
+      if (watchdogTimer) clearInterval(watchdogTimer);
       window.removeEventListener("online", reconnectNow);
+      window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", reconnectNow);
       const ws = wsRef.current;
-      try {
-        ws?.close();
-      } catch {
-        /* ignore */
-      }
-      wsRef.current = null;
+      abandonSocket(ws);
     };
   }, [userId, username, zoneId, send]);
 
