@@ -72,6 +72,7 @@ const PROFILE = {
     lastX: 1,
     lastY: 1,
     discoveredZones: ["savannahReserve"],
+    discoveredDistricts: ["lodge"],
     collectedNodeIds: [],
   },
   stats: {},
@@ -220,5 +221,28 @@ describe("useOpenWorldSocket", () => {
     rerender({ userId: "u1" });
     expect(MockWebSocket.instances).toBe(1);
     unmount();
+  });
+
+  it("reconnects with backoff and rejoins at the latest predicted position", () => {
+    vi.useFakeTimers();
+    try {
+      const { result, unmount } = renderHook(() =>
+        useOpenWorldSocket({ zoneId: "savannahReserve", userId: "u1", username: "Tester", animalType: "zebra" }),
+      );
+      const first = MockWebSocket.last!;
+      act(() => first.open());
+      act(() => result.current.sync(880, 920, "zebra"));
+      act(() => first.close());
+      expect(result.current.connected).toBe(false);
+      act(() => vi.advanceTimersByTime(600));
+      const second = MockWebSocket.last!;
+      expect(second).not.toBe(first);
+      act(() => second.open());
+      const join = JSON.parse(second.sent[0]);
+      expect(join.payload).toMatchObject({ x: 880, y: 920, animalType: "zebra" });
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

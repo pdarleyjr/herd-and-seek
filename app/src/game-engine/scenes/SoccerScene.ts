@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { readControlSettings } from "../systems/ControlSettings";
 import {
   FIELD_HEIGHT,
   FIELD_WIDTH,
@@ -68,6 +69,31 @@ export class SoccerScene extends Phaser.Scene {
   private energyFill?: Phaser.GameObjects.Rectangle;
   private goalBanner?: Phaser.GameObjects.Container;
   private previousPhase: SoccerMatchSnapshot["phase"];
+  private externalMove: SoccerVector = { x: 0, y: 0 };
+  private handedness: "right" | "left" = "right";
+  private readonly resetInput = () => {
+    this.joystickPointerId = null;
+    this.aimPointerId = null;
+    this.joystickMove = { x: 0, y: 0 };
+    this.externalMove = { x: 0, y: 0 };
+    this.joystickBase?.setVisible(false);
+    this.joystickKnob?.setVisible(false);
+    this.bridge.send({ type: "MOVE", payload: { x: 0, y: 0, sprint: false, sequence: ++this.movementSequence } });
+  };
+  private readonly receiveExternalMove = (event: Event) => {
+    const detail = (event as CustomEvent<SoccerVector>).detail;
+    if (detail && Number.isFinite(detail.x) && Number.isFinite(detail.y)) this.externalMove = detail;
+  };
+  private readonly receiveExternalKick = () => {
+    const local = this.snapshot.players.find((player) => player.id === this.bridge.localPlayerId);
+    if (this.snapshot.phase === "ended") this.bridge.send({ type: "RESTART" });
+    else if (local) this.kick(this.kickTargetFromFacing(local));
+  };
+  private readonly receiveControlSettings = (event: Event) => {
+    const handedness = (event as CustomEvent<{ handedness?: "right" | "left" }>).detail?.handedness;
+    this.handedness = handedness === "left" ? "left" : "right";
+    this.layoutHud();
+  };
 
   constructor(bridge: SoccerBridge) {
     super("SoccerScene");
@@ -77,6 +103,7 @@ export class SoccerScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.handedness = readControlSettings().handedness;
     this.physics.world.setBounds(-GOAL_DEPTH, 0, FIELD_WIDTH + GOAL_DEPTH * 2, FIELD_HEIGHT);
     this.cameras.main.setBounds(-180, -140, FIELD_WIDTH + 360, FIELD_HEIGHT + 280).setBackgroundColor("#f8c891");
     this.renderArena();
@@ -88,6 +115,12 @@ export class SoccerScene extends Phaser.Scene {
     this.unsubscribe = this.bridge.subscribe((snapshot) => this.applySnapshot(snapshot));
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layoutHud, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
+    window.addEventListener("blur", this.resetInput);
+    window.addEventListener("orientationchange", this.resetInput);
+    window.addEventListener("hs-soccer-control", this.receiveExternalMove);
+    window.addEventListener("hs-soccer-kick", this.receiveExternalKick);
+    window.addEventListener("hs-control-settings", this.receiveControlSettings);
+    document.addEventListener("visibilitychange", this.resetInput);
     this.events.emit("soccer-ready", { matchId: this.snapshot.matchId });
   }
 
@@ -125,7 +158,7 @@ export class SoccerScene extends Phaser.Scene {
     this.renderGoal(FIELD_WIDTH, "coral");
     this.renderCrowd();
     this.renderCornerFlags();
-    this.add.text(FIELD_WIDTH / 2, -83, "MEADOWBANK  •  FIELD LEAGUE", {
+    this.add.text(FIELD_WIDTH / 2, -83, "RANGER SQUAD  VS  WILD HERD", {
       fontFamily: "Arial Rounded MT Bold, Trebuchet MS, sans-serif",
       fontSize: "32px",
       fontStyle: "bold",
@@ -193,6 +226,19 @@ export class SoccerScene extends Phaser.Scene {
     const color = TEAM_COLORS[team];
     const graphics = this.make.graphics({ x: 0, y: 0 }, false);
     graphics.fillStyle(0x3b0855, 0.22).fillEllipse(49, 91, 62, 21);
+    if (team === "teal") {
+      graphics.lineStyle(12, color.dark, 1).lineBetween(28, 64, 23, 91).lineBetween(65, 64, 72, 91);
+      graphics.fillStyle(color.primary, 1).fillRoundedRect(20, 38, 62, 42, 18);
+      graphics.lineStyle(5, color.dark, 1).strokeRoundedRect(20, 38, 62, 42, 18);
+      graphics.fillStyle(0xfff3d5, 1).fillRect(33, 40, 8, 37).fillRect(52, 40, 8, 37).fillRect(70, 43, 7, 31);
+      graphics.fillStyle(color.primary, 1).fillCircle(22, 35, 19);
+      graphics.lineStyle(5, color.dark, 1).strokeCircle(22, 35, 19);
+      graphics.fillStyle(color.dark, 1).fillTriangle(7, 22, 17, 7, 23, 26).fillTriangle(24, 22, 36, 8, 36, 29);
+      graphics.fillStyle(0xfff3d5, 1).fillCircle(16, 33, 3);
+      graphics.generateTexture(key, 98, 104);
+      graphics.destroy();
+      return;
+    }
     graphics.lineStyle(13, color.dark, 1).lineBetween(39, 69, 33, 90).lineBetween(59, 69, 65, 90);
     graphics.lineStyle(12, color.dark, 1).lineBetween(31, 45, 16, 64).lineBetween(67, 45, 82, 64);
     graphics.fillStyle(color.primary, 1).fillRoundedRect(25, 31, 48, 48, 12);
@@ -220,8 +266,8 @@ export class SoccerScene extends Phaser.Scene {
     const board = this.add.rectangle(0, 0, 338, 91, 0x3b0855, 0.96).setOrigin(0.5, 0).setStrokeStyle(3, 0xfff3d5, 0.82);
     const coralPill = this.add.rectangle(-112, 45, 88, 54, 0xee227d, 1).setStrokeStyle(3, 0x67134f, 1);
     const tealPill = this.add.rectangle(112, 45, 88, 54, 0x30c0b7, 1).setStrokeStyle(3, 0x174b62, 1);
-    const coralLetter = this.add.text(-112, 45, "C", { fontFamily: "Arial Rounded MT Bold", fontSize: "21px", fontStyle: "bold", color: "#fff3d5" }).setOrigin(0.5);
-    const tealLetter = this.add.text(112, 45, "T", { fontFamily: "Arial Rounded MT Bold", fontSize: "21px", fontStyle: "bold", color: "#fff3d5" }).setOrigin(0.5);
+    const coralLetter = this.add.text(-112, 45, "R", { fontFamily: "Arial Rounded MT Bold", fontSize: "21px", fontStyle: "bold", color: "#fff3d5" }).setOrigin(0.5);
+    const tealLetter = this.add.text(112, 45, "H", { fontFamily: "Arial Rounded MT Bold", fontSize: "21px", fontStyle: "bold", color: "#fff3d5" }).setOrigin(0.5);
     this.scoreText = this.add.text(0, 51, "0  —  0", { fontFamily: "Arial Rounded MT Bold", fontSize: "31px", fontStyle: "bold", color: "#fff3d5" }).setOrigin(0.5);
     this.clockText = this.add.text(0, 15, "03:00", { fontFamily: "Trebuchet MS", fontSize: "17px", fontStyle: "bold", color: "#ffd76c", letterSpacing: 3 }).setOrigin(0.5);
     scoreboard.add([boardShadow, board, coralPill, tealPill, coralLetter, tealLetter, this.scoreText, this.clockText]);
@@ -259,6 +305,8 @@ export class SoccerScene extends Phaser.Scene {
     this.input.on("pointerdown", this.onPointerDown, this);
     this.input.on("pointermove", this.onPointerMove, this);
     this.input.on("pointerup", this.onPointerUp, this);
+    this.input.on("pointerupoutside", this.onPointerUp, this);
+    this.input.on("pointercancel", this.onPointerUp, this);
   }
 
   private applySnapshot(snapshot: SoccerMatchSnapshot, force = false): void {
@@ -319,7 +367,7 @@ export class SoccerScene extends Phaser.Scene {
       x: (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0),
       y: (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0),
     };
-    const movement = Math.hypot(this.joystickMove.x, this.joystickMove.y) > 0.01 ? this.joystickMove : keyboard;
+    const movement = Math.hypot(this.externalMove.x, this.externalMove.y) > 0.01 ? this.externalMove : Math.hypot(this.joystickMove.x, this.joystickMove.y) > 0.01 ? this.joystickMove : keyboard;
     if (Math.hypot(movement.x, movement.y) > 0.01) {
       const length = Math.max(1, Math.hypot(movement.x, movement.y));
       this.facing = { x: movement.x / length, y: movement.y / length };
@@ -329,7 +377,7 @@ export class SoccerScene extends Phaser.Scene {
       this.sendAccumulator = 0;
       this.bridge.send({
         type: "MOVE",
-        payload: { x: movement.x, y: movement.y, sprint: this.keys.SHIFT.isDown || Math.hypot(this.joystickMove.x, this.joystickMove.y) > 0.82, sequence: ++this.movementSequence },
+        payload: { x: movement.x, y: movement.y, sprint: this.keys.SHIFT.isDown || Math.hypot(movement.x, movement.y) > 0.82, sequence: ++this.movementSequence },
       });
     }
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.kick(this.kickTargetFromFacing(local));
@@ -380,7 +428,7 @@ export class SoccerScene extends Phaser.Scene {
       const count = Math.max(1, Math.ceil(this.snapshot.phaseRemainingMs / 1000));
       this.phaseText?.setText(`KICKOFF  ${count}`);
     } else if (this.snapshot.phase === "ended") {
-      const result = this.snapshot.coralScore === this.snapshot.tealScore ? "FULL TIME  •  DRAW" : this.snapshot.coralScore > this.snapshot.tealScore ? "FULL TIME  •  CORAL WIN" : "FULL TIME  •  TEAL WIN";
+      const result = this.snapshot.coralScore === this.snapshot.tealScore ? "FULL TIME  •  DRAW" : this.snapshot.coralScore > this.snapshot.tealScore ? "FULL TIME  •  RANGER SQUAD WIN" : "FULL TIME  •  WILD HERD WIN";
       this.phaseText?.setText(result);
       this.kickLabel?.setText("REPLAY").setFontSize(12);
     } else if (this.snapshot.phase === "goal") {
@@ -433,7 +481,7 @@ export class SoccerScene extends Phaser.Scene {
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
     const width = this.scale.width;
     const height = this.scale.height;
-    const kickX = width - Math.max(78, Math.min(118, width * 0.095));
+    const kickX = this.handedness === "left" ? Math.max(78, Math.min(118, width * 0.095)) : width - Math.max(78, Math.min(118, width * 0.095));
     const kickY = height - Math.max(84, Math.min(118, height * 0.14));
     if (Math.hypot(pointer.x - kickX, pointer.y - kickY) <= 68) {
       const local = this.snapshot.players.find((player) => player.id === this.bridge.localPlayerId);
@@ -441,7 +489,8 @@ export class SoccerScene extends Phaser.Scene {
       else if (local) this.kick(this.kickTargetFromFacing(local));
       return;
     }
-    if (pointer.x <= width * 0.58 && pointer.y >= height * 0.36 && this.joystickPointerId === null) {
+    const inJoystickHalf = this.handedness === "left" ? pointer.x >= width * 0.42 : pointer.x <= width * 0.58;
+    if (inJoystickHalf && pointer.y >= height * 0.36 && this.joystickPointerId === null) {
       this.joystickPointerId = pointer.id;
       this.joystickOrigin = { x: pointer.x, y: pointer.y };
       this.joystickBase?.setPosition(pointer.x, pointer.y).setVisible(true);
@@ -503,8 +552,8 @@ export class SoccerScene extends Phaser.Scene {
     const energy = this.children.getByName("soccer-energy") as Phaser.GameObjects.Container | null;
     scoreboard?.setPosition(width / 2, 18).setScale(width < 560 ? 0.78 : 1);
     phase?.setPosition(width / 2, width < 560 ? 101 : 121).setScale(width < 560 ? 0.76 : 1);
-    energy?.setPosition(20, height - 38).setScale(width < 560 ? 0.8 : 1);
-    const kickX = width - Math.max(78, Math.min(118, width * 0.095));
+    energy?.setPosition(this.handedness === "left" ? width - 216 : 20, height - 38).setScale(width < 560 ? 0.8 : 1);
+    const kickX = this.handedness === "left" ? Math.max(78, Math.min(118, width * 0.095)) : width - Math.max(78, Math.min(118, width * 0.095));
     const kickY = height - Math.max(84, Math.min(118, height * 0.14));
     this.kickButton?.setPosition(kickX, kickY).setScale(width < 560 ? 0.88 : 1);
     this.kickLabel?.setPosition(kickX, kickY);
@@ -519,6 +568,14 @@ export class SoccerScene extends Phaser.Scene {
     this.input.off("pointerdown", this.onPointerDown, this);
     this.input.off("pointermove", this.onPointerMove, this);
     this.input.off("pointerup", this.onPointerUp, this);
+    this.input.off("pointerupoutside", this.onPointerUp, this);
+    this.input.off("pointercancel", this.onPointerUp, this);
+    window.removeEventListener("blur", this.resetInput);
+    window.removeEventListener("orientationchange", this.resetInput);
+    window.removeEventListener("hs-soccer-control", this.receiveExternalMove);
+    window.removeEventListener("hs-soccer-kick", this.receiveExternalKick);
+    window.removeEventListener("hs-control-settings", this.receiveControlSettings);
+    document.removeEventListener("visibilitychange", this.resetInput);
     this.scale.off(Phaser.Scale.Events.RESIZE, this.layoutHud, this);
     this.playerVisuals.clear();
     this.bridge.destroy?.();

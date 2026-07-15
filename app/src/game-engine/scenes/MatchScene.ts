@@ -52,6 +52,7 @@ export class MatchScene extends Phaser.Scene {
   private unsubscribers: Array<() => void> = [];
   private terrain: TerrainSurfaceSystem = createMatchTerrainSurfaceSystem("forest");
   private reducedMotion = false;
+  private touchControl = { x: 0, y: 0 };
 
   private readonly bridge: GameBridge;
 
@@ -87,6 +88,7 @@ export class MatchScene extends Phaser.Scene {
         this.environmentalCues?.configure(tier);
       }),
       this.bridge.events.on("PERK_ACTIVATE", () => this.activatePerk()),
+      this.bridge.events.on("CONTROL_MOVE", (vector) => { this.touchControl = vector; }),
       this.bridge.events.on("DECOY_SPAWN", (payload) => this.spawnDecoy(payload)),
     ];
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
@@ -102,7 +104,9 @@ export class MatchScene extends Phaser.Scene {
 
     const now = Date.now();
     const isCamouflaged = this.perkRuntime.perk === "camouflage" && this.perkRuntime.activeUntil > now;
-    const input = isCamouflaged || !player.isAlive || state.phase !== "PLAYING" ? { x: 0, y: 0 } : normalizeInput(this.inputManager.movement());
+    const hardwareInput = this.inputManager.movement();
+    const selectedInput = Math.hypot(this.touchControl.x, this.touchControl.y) > 0.04 ? this.touchControl : hardwareInput;
+    const input = isCamouflaged || !player.isAlive || state.phase !== "PLAYING" ? { x: 0, y: 0 } : normalizeInput(selectedInput);
     const surface = this.terrain.sample(local.sprite.x, local.sprite.y);
     let speed = (player.isHunter ? HUNTER_SPEED : ANIMAL_SPEED) * 72;
     if (player.perk === "speedBoost" && !player.isHunter) speed *= getPerkSpec("speedBoost").speedMultiplier;
@@ -129,6 +133,15 @@ export class MatchScene extends Phaser.Scene {
     this.updateEnvironment(player.id, player.isHunter ? "hunter" : "animal", local.sprite.x, local.sprite.y, Math.hypot(velocityX, velocityY), surface, now);
 
     if (this.inputManager.perkJustPressed()) this.bridge.events.emit("PERK_ACTIVATE", { perk: player.perk });
+    if (player.isHunter && this.inputManager.fireJustPressed()) {
+      const aim = this.inputManager.aimVector();
+      const magnitude = Math.hypot(aim.x, aim.y);
+      const direction = magnitude > 0.15 ? { x: aim.x / magnitude, y: aim.y / magnitude } : { x: local.sprite.flipX ? -1 : 1, y: 0 };
+      const targetX = local.sprite.x + direction.x * 420;
+      const targetY = local.sprite.y + direction.y * 420;
+      this.bridge.events.emit("SHOOT", { targetX, targetY });
+      this.combatFx?.muzzleFlash(local.sprite.x, local.sprite.y, targetX, targetY);
+    }
 
     this.sendElapsed += Math.min(delta, 100);
     if (this.sendElapsed >= 50 && moving) {
@@ -170,7 +183,7 @@ export class MatchScene extends Phaser.Scene {
   private renderWorld(levelId: SerializedState["levelId"]): void {
     this.terrain = createMatchTerrainSurfaceSystem(levelId);
     this.children.removeAll(true);
-    this.colliders = buildBiomeWorld(this, levelId);
+    this.colliders = buildBiomeWorld(this, levelId, this.bridge.quality);
     const biomeName = levelId === "forest" ? "Fernwhistle Forest" : levelId === "deepDark" ? "The Deep Dark" : "Savannah at Dusk";
     this.add.text(WORLD_SIZE / 2, 115, biomeName, { fontFamily: "Georgia, serif", fontSize: "44px", color: "#fff0bd", stroke: "#193425", strokeThickness: 8 }).setOrigin(0.5).setDepth(10);
     this.add.text(WORLD_SIZE / 2, 172, levelId === "forest" ? "Moonpond • Old Ranger Trail • Whispering Grove" : "Herd territory", { fontFamily: "Georgia, serif", fontSize: "19px", color: "#e4d39a", backgroundColor: "#152e23b8", padding: { x: 16, y: 8 } }).setOrigin(0.5).setDepth(10);
@@ -236,7 +249,8 @@ export class MatchScene extends Phaser.Scene {
       this.locomotion.forget(actorId); this.ripples?.remove(actorId); this.environmentalCues?.remove(actorId);
       sprite.destroy(); this.npcSprites.delete(id); this.npcMotion.delete(id);
     }
-    for (const npc of state.npcSeeds) {
+    const npcBudget = this.bridge.quality === "high" ? state.npcSeeds.length : this.bridge.quality === "balanced" ? 32 : 20;
+    for (const npc of state.npcSeeds.slice(0, npcBudget)) {
       let sprite = this.npcSprites.get(npc.id);
       if (!sprite) {
         sprite = this.add.sprite(npc.x, npc.y, ensureAnimalTexture(this, npc.animalType)).setDisplaySize(72, 72).setAlpha(0.82).setDepth(npc.y);

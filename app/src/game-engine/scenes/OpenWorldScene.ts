@@ -27,6 +27,22 @@ interface PlayerVisual {
   highlight?: Phaser.GameObjects.Arc;
 }
 
+function hashOpenWorldActor(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return (hash >>> 0) / 4294967295;
+}
+
+interface AmbientBehavior {
+  homeX: number;
+  homeY: number;
+  targetX: number;
+  targetY: number;
+  nextDecisionAt: number;
+  speed: number;
+  resting: boolean;
+}
+
 export class OpenWorldScene extends Phaser.Scene {
   private readonly bridge: OpenWorldBridge;
   private snapshot: OpenWorldSnapshot = { zoneState: null, profile: null, questProgress: {} };
@@ -35,6 +51,7 @@ export class OpenWorldScene extends Phaser.Scene {
   private readonly collectibles = new Map<string, Phaser.GameObjects.Container>();
   private readonly ambientNpcs = new Map<string, Phaser.GameObjects.Sprite>();
   private readonly ambientNpcMotion = new Map<string, { x: number; y: number; time: number }>();
+  private readonly ambientNpcBehavior = new Map<string, AmbientBehavior>();
   private readonly interpolator = new RemotePlayerInterpolator(100);
   private readonly locomotion = new LocomotionAnimationSystem();
   private readonly terrain = createOpenWorldTerrainSurfaceSystem({
@@ -52,6 +69,8 @@ export class OpenWorldScene extends Phaser.Scene {
   private currentAction: ContextAction | null = null;
   private syncElapsed = 0;
   private minimap?: Phaser.GameObjects.Graphics;
+  private worldEventMarker?: Phaser.GameObjects.Container;
+  private worldEventId = "";
   private unsubscribers: Array<() => void> = [];
   private quality: QualityTier = "balanced";
   private reducedMotion = false;
@@ -249,15 +268,7 @@ export class OpenWorldScene extends Phaser.Scene {
       const actorId = `reserve-npc:${index}`;
       this.ambientNpcs.set(actorId, sprite);
       this.ambientNpcMotion.set(actorId, { x: sprite.x, y: sprite.y, time: 0 });
-      if (!this.reducedMotion) this.tweens.add({
-        targets: sprite,
-        x: sprite.x + 30 + index % 3 * 12,
-        y: sprite.y + (index % 2 ? 8 : -8),
-        duration: 2_600 + index * 180,
-        yoyo: true,
-        repeat: -1,
-        ease: "Sine.easeInOut",
-      });
+      this.ambientNpcBehavior.set(actorId, { homeX: sprite.x, homeY: sprite.y, targetX: sprite.x, targetY: sprite.y, nextDecisionAt: 800 + index * 170, speed: 18 + index % 4 * 5, resting: index % 5 === 0 });
     }
   }
 
@@ -328,6 +339,7 @@ export class OpenWorldScene extends Phaser.Scene {
     if (me) this.upsertLocal(me);
     this.syncRemotes(state);
     this.syncCollectibles(state);
+    this.syncWorldEvent(state);
   }
 
   private upsertLocal(player: OpenWorldPlayerState): void {
@@ -371,6 +383,30 @@ export class OpenWorldScene extends Phaser.Scene {
 
   private updateAmbientNpcs(now: number, delta: number): void {
     for (const [actorId, sprite] of this.ambientNpcs) {
+      const behavior = this.ambientNpcBehavior.get(actorId);
+      if (behavior) {
+        const index = Number(actorId.split(":").at(-1) ?? 0);
+        if (now >= behavior.nextDecisionAt) {
+          const cycle = Math.floor(now / (2_300 + index * 29));
+          const phase = hashOpenWorldActor(`${actorId}:${cycle}`);
+          const angle = phase * Math.PI * 2;
+          const radius = 70 + ((cycle * 37 + index * 19) % 170);
+          behavior.resting = (cycle + index) % 6 === 0;
+          behavior.targetX = behavior.homeX + Math.cos(angle) * radius;
+          behavior.targetY = behavior.homeY + Math.sin(angle) * radius * .66;
+          behavior.nextDecisionAt = now + 1_800 + ((index * 251 + cycle * 97) % 2_800);
+        }
+        if (!behavior.resting && !this.reducedMotion) {
+          const dx = behavior.targetX - sprite.x;
+          const dy = behavior.targetY - sprite.y;
+          const distance = Math.hypot(dx, dy);
+          if (distance > 4) {
+            const step = Math.min(distance, behavior.speed * Math.min(delta, 100) / 1_000);
+            sprite.x += dx / distance * step;
+            sprite.y += dy / distance * step;
+          }
+        }
+      }
       const previous = this.ambientNpcMotion.get(actorId) ?? { x: sprite.x, y: sprite.y, time: now - delta };
       const elapsed = previous.time > 0 ? Math.max(now - previous.time, 1) : Math.max(delta, 1);
       const velocityX = (sprite.x - previous.x) * 1_000 / elapsed;
@@ -390,6 +426,22 @@ export class OpenWorldScene extends Phaser.Scene {
       this.updateEnvironment(actorId, "npc", sprite.x, sprite.y, Math.hypot(velocityX, velocityY), surface, now);
       this.ambientNpcMotion.set(actorId, { x: sprite.x, y: sprite.y, time: now });
     }
+  }
+
+  private syncWorldEvent(state: OpenWorldZoneState): void {
+    const event = state.activeWorldEvent;
+    if (event?.id === this.worldEventId) return;
+    this.worldEventMarker?.destroy(true);
+    this.worldEventMarker = undefined;
+    this.worldEventId = event?.id ?? "";
+    if (!event) return;
+    const district = DISTRICTS.find((candidate) => candidate.id === event.districtId);
+    if (!district) return;
+    const glow = this.add.circle(0, 0, 105, 0xffd45c, .13).setStrokeStyle(8, 0xee227d, .72);
+    const beacon = this.add.star(0, 0, 8, 20, 42, 0xffd45c, .95).setStrokeStyle(5, 0x3b0855, 1);
+    const label = this.add.text(0, -105, event.title, { fontFamily: "Arial Black, Nunito", fontSize: "18px", color: "#3b0855", backgroundColor: "#fff5deee", padding: { x: 12, y: 7 }, stroke: "#ffd45c", strokeThickness: 2 }).setOrigin(.5);
+    this.worldEventMarker = this.add.container(district.cx, district.cy, [glow, beacon, label]).setDepth(district.cy + 8);
+    if (!this.reducedMotion) this.tweens.add({ targets: [glow, beacon], scale: { from: .88, to: 1.12 }, angle: 12, duration: 1_100, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
   }
 
   private updateEnvironment(actorId: string, role: LocomotionRole, x: number, y: number, speed: number, surface: TerrainSample, now: number): void {
@@ -461,6 +513,7 @@ export class OpenWorldScene extends Phaser.Scene {
     this.interpolator.clear();
     this.ambientNpcs.clear();
     this.ambientNpcMotion.clear();
+    this.ambientNpcBehavior.clear();
     this.bridge.reportPrompt(null);
   }
 }

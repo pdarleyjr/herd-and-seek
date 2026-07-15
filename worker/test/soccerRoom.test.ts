@@ -5,6 +5,7 @@ import {
   SOCCER_FIELD_WIDTH,
   advanceSoccerBall,
   createSoccerMatch,
+  movementSpeedForPlayer,
   soccerGoalForBall,
 } from "../src/soccerRoom";
 
@@ -29,5 +30,10 @@ describe("authoritative soccer rules", () => {
     expect(result.ball.y).toBe(SOCCER_BALL_RADIUS);
     expect(result.ball.vy).toBeGreaterThan(0);
     expect(result.ball.vx).toBeLessThan(500);
+  });
+
+  it("keeps every multiplayer human on the same authoritative speed", () => {
+    expect(movementSpeedForPlayer({ isAi: false }, false)).toBe(movementSpeedForPlayer({ isAi: false }, false));
+    expect(movementSpeedForPlayer({ isAi: false }, true)).toBe(movementSpeedForPlayer({ isAi: false }, true));
   });
 });

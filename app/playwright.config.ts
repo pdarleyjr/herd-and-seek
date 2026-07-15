@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5173";
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:5273";
 const LOCAL_WORKER_URL = "http://127.0.0.1:8787";
 
 export default defineConfig({
@@ -18,6 +18,8 @@ export default defineConfig({
   projects: [
     { name: "functional-desktop", testMatch: /(?:phaser-smoke|multiplayer|open-world|perks|admin|performance|soccer)\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } } },
     { name: "functional-mobile", testMatch: /mobile-gameplay\.spec\.ts/, use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } } },
+    { name: "tablet-chromium", testMatch: /(?:mobile-gameplay|tablet-controls)\.spec\.ts/, use: { ...devices["iPad Pro 11"], viewport: { width: 1180, height: 820 } } },
+    { name: "tablet-webkit", testMatch: /(?:mobile-gameplay|tablet-controls)\.spec\.ts/, use: { ...devices["iPad Pro 11"], browserName: "webkit", viewport: { width: 1180, height: 820 } } },
     { name: "desktop-1920", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } } },
     { name: "lobby-problem-1714", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1714, height: 895 } } },
     { name: "laptop-1366", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } } },
@@ -35,7 +37,7 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: "npm run dev -- --port 5173 --host 127.0.0.1",
+      command: "npm run dev -- --port 5273 --host 127.0.0.1",
       url: BASE_URL,
       env: { VITE_BACKEND_ORIGIN: LOCAL_WORKER_URL },
       reuseExistingServer: !process.env.CI,

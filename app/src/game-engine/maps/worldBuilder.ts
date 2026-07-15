@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import type { LevelId } from "../../types";
 import { WORLD_SIZE } from "../../types";
+import type { QualityTier } from "../types";
 
 const PALETTES: Record<LevelId, { ground: number; tile: number; accent: number; path: number; water: number }> = {
   forest: { ground: 0x315d38, tile: 0x3f7041, accent: 0x98bd4c, path: 0xb98b59, water: 0x4d9aaa },
@@ -11,7 +12,7 @@ const PALETTES: Record<LevelId, { ground: number; tile: number; accent: number; 
 const MAP_SCALE = WORLD_SIZE / 2_000;
 const sx = (value: number): number => Math.round(value * MAP_SCALE);
 
-export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.Physics.Arcade.StaticGroup {
+export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId, quality: QualityTier = "balanced"): Phaser.Physics.Arcade.StaticGroup {
   const palette = PALETTES[levelId];
   const tileKey = `ground-${levelId}`;
   if (!scene.textures.exists(tileKey)) {
@@ -35,7 +36,8 @@ export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.P
   const colliders = scene.physics.add.staticGroup();
   const random = new Phaser.Math.RandomDataGenerator([`herd-seek-${levelId}`]);
   const acceptedTrees: Array<{ x: number; y: number }> = [];
-  for (let index = 0; index < 96 && acceptedTrees.length < 54; index += 1) {
+  const propBudget = quality === "high" ? 54 : quality === "balanced" ? 40 : 26;
+  for (let index = 0; index < 96 && acceptedTrees.length < propBudget; index += 1) {
     const x = random.between(70, WORLD_SIZE - 70);
     const y = random.between(70, WORLD_SIZE - 70);
     if (Phaser.Math.Distance.Between(x, y, sx(520), sx(540)) < sx(280)) continue;
@@ -50,11 +52,12 @@ export function buildBiomeWorld(scene: Phaser.Scene, levelId: LevelId): Phaser.P
     else addSavannahProp(scene, x, y, index, random);
   }
 
-  for (let index = 0; index < 210; index += 1) {
+  const foliageBudget = quality === "high" ? 210 : quality === "balanced" ? 128 : 68;
+  for (let index = 0; index < foliageBudget; index += 1) {
     const x = random.between(24, WORLD_SIZE - 24);
     const y = random.between(24, WORLD_SIZE - 24);
     const tuft = scene.add.star(x, y, 4, 3, random.between(8, 15), palette.accent, random.realInRange(0.18, 0.48)).setRotation(random.realInRange(-0.4, 0.4)).setDepth(y - 4);
-    if (index % 4 === 0) scene.tweens.add({ targets: tuft, angle: random.between(-5, 5), duration: random.between(1400, 2600), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    if (quality !== "battery" && index % (quality === "high" ? 4 : 7) === 0) scene.tweens.add({ targets: tuft, angle: random.between(-5, 5), duration: random.between(1400, 2600), yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
   }
 
   return colliders;

@@ -3,8 +3,12 @@ import Phaser from "phaser";
 import { createLocalSoccerBridge, createNetworkSoccerBridge } from "../game-engine/soccer";
 import { SoccerScene } from "../game-engine/scenes/SoccerScene";
 import AudioControls from "./AudioControls";
+import ControlSettingsPanel from "./ControlSettingsPanel";
+import { useControlSettings } from "./useControlSettings";
+import TouchJoystick from "./TouchJoystick";
 import type { SoccerSetupSelection } from "./SoccerSetup";
 import "./soccerGame.css";
+import "./soccerGameEnhancements.css";
 
 interface SoccerGameProps {
   userId: string;
@@ -20,11 +24,12 @@ export default function SoccerGame({ userId, username, selection, onExit, networ
   const [bridge] = useState(() => network
     ? createNetworkSoccerBridge({ roomId: network.roomId, userId, username, team: selection.team, teamSize: selection.teamSize, accessToken: network.accessToken })
     : createLocalSoccerBridge({ localPlayerId: userId, localPlayerName: username, selectedTeam: selection.team, teamSize: selection.teamSize }));
+  const controlSettings = useControlSettings();
 
   useEffect(() => {
     if (!hostRef.current || gameRef.current) return;
     gameRef.current = new Phaser.Game({
-      type: Phaser.AUTO,
+      type: Phaser.CANVAS,
       parent: hostRef.current,
       width: hostRef.current.clientWidth || 1280,
       height: hostRef.current.clientHeight || 720,
@@ -43,12 +48,15 @@ export default function SoccerGame({ userId, username, selection, onExit, networ
   }, [bridge]);
 
   return (
-    <main className="soccer-game" data-team={selection.team} data-format={selection.format}>
+    <main className="soccer-game" data-team={selection.team} data-format={selection.format} data-handedness={controlSettings.handedness}>
       <div ref={hostRef} className="soccer-game__host" aria-label="Herd and Seek Field League soccer match" />
       <div className="soccer-game__top-actions">
         <button type="button" onClick={onExit} className="soccer-game__exit">Exit field</button>
         <AudioControls compact />
+        <ControlSettingsPanel />
       </div>
+      <TouchJoystick settings={controlSettings} onMove={(x, y) => window.dispatchEvent(new CustomEvent("hs-soccer-control", { detail: { x, y } }))} />
+      <button type="button" className="soccer-game__kick" onPointerDown={(event) => { event.preventDefault(); window.dispatchEvent(new Event("hs-soccer-kick")); }}>Kick</button>
       {network && (
         <div className="soccer-game__crew-note" role="status">Crew Match · {network.roomId} · open positions use AI</div>
       )}

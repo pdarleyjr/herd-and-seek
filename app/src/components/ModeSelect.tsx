@@ -1,5 +1,6 @@
 import "./modeSelect.css";
 import AudioControls from "./AudioControls";
+import ControlSettingsPanel from "./ControlSettingsPanel";
 
 interface ModeSelectProps {
   onMultiplayer: () => void;
@@ -17,6 +18,7 @@ export default function ModeSelect({ onMultiplayer, onSolo, onOpenWorld, onSocce
         <div><p>Herd &amp; Seek</p><span>Field Expedition Desk</span></div>
         <div className="mode-camp__status"><i /> Ranger network ready</div>
         <AudioControls compact />
+        <ControlSettingsPanel />
       </header>
 
       <section className="mode-camp__intro" aria-labelledby="choose-expedition">
@@ -51,7 +53,7 @@ export default function ModeSelect({ onMultiplayer, onSolo, onOpenWorld, onSocce
           <ModeIllustration kind="soccer" />
           <span className="mode-card__tag">Field League</span>
           <strong>Striker Field</strong>
-          <span>Choose Coral or Teal, command an AI squad, and battle through a three-minute match.</span>
+          <span>Choose the Ranger Squad or Wild Herd, then battle through a three-minute match.</span>
           <span className="mode-card__action">Take the field <b aria-hidden="true">→</b></span>
         </button>
       </section>

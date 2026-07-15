@@ -10,7 +10,7 @@ async function authenticate(page: Page, name = "TrailTester") {
 
 async function enterLobby(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await authenticate(page, `Trail-${Date.now()}`);
+  await authenticate(page, "TrailVisual");
   await page.getByRole("button", { name: /Multiplayer/i }).click();
   await page.getByRole("textbox", { name: /^Room name$/i }).fill(`Visual Camp ${Date.now()}`);
   await page.getByRole("button", { name: /^Create room$/i }).click();
@@ -41,7 +41,7 @@ test.describe("core navigation surfaces", () => {
     await page.getByRole("button", { name: /Solo vs AI/i }).click();
     await expect(page.getByRole("heading", { name: /Solo field plan/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Back$/i })).toBeInViewport();
-    await expect(page.getByRole("button", { name: /Start solo expedition/i })).toBeInViewport();
+    await expect(page.getByRole("button", { name: /Review expedition/i })).toBeInViewport();
     await expect(page).toHaveScreenshot("solo-setup.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
   });
 
@@ -86,6 +86,7 @@ test.describe("responsive lobby", () => {
   test("captures the reviewed lobby", async ({ page }) => {
     await page.getByRole("button", { name: /^Rabbit$/i }).click();
     await expect(page.locator(".lobby-v2")).toHaveAttribute("data-player-animal", "rabbit");
+    await page.addStyleTag({ content: '.room-ticket strong{font-size:0}.room-ticket strong::after{content:"HSR-DEMO";font-size:.9rem}' });
     await expect(page).toHaveScreenshot("multiplayer-lobby-admin.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
   });
 });

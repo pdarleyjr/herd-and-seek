@@ -5,7 +5,7 @@
 // instant boot / offline-friendly menus and reconcile with the server whenever
 // we can reach it. The cache is implemented in ./storage/profileCache and is
 // never authoritative for economy values.
-import type { PlayerProfile } from "./economy";
+import type { LoadoutProfile, PlayerProfile } from "./economy";
 import {
   readCachedProfile,
   writeCachedProfile,
@@ -82,4 +82,12 @@ export async function selectCosmetic(
   cosmeticId: string | null,
 ): Promise<PlayerProfile | null> {
   return apiCall("select", userId, username, { cosmeticId });
+}
+
+export async function selectLoadout(
+  userId: string,
+  username: string,
+  selection: { slot: keyof Omit<LoadoutProfile, "animalSkins">; itemId: string } | { slot: "animalSkin"; species: string; itemId: string },
+): Promise<PlayerProfile | null> {
+  return apiCall("select-loadout", userId, username, selection);
 }

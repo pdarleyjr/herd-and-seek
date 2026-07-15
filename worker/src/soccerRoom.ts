@@ -53,6 +53,13 @@ const PLAYER_SPEED = 360;
 const SPRINT_SPEED = 470;
 const TICK_MS = 1000 / 30;
 
+export function movementSpeedForPlayer(_player: Pick<SoccerPlayerSnapshot, "isAi">, sprinting: boolean): number {
+  // Multiplayer is intentionally symmetric: team, role, and AI status never
+  // alter the locomotion ceiling. The 8% human boost exists only in local
+  // quick play where it makes a solo match feel responsive and forgiving.
+  return sprinting ? SPRINT_SPEED : PLAYER_SPEED;
+}
+
 export function soccerGoalForBall(ball: SoccerBallSnapshot): SoccerTeamId | null {
   const inMouth = Math.abs(ball.y - SOCCER_FIELD_HEIGHT / 2) <= SOCCER_GOAL_HALF_HEIGHT;
   if (!inMouth) return null;
@@ -237,7 +244,7 @@ export class SoccerRoomDurableObject implements DurableObject {
     controller ??= { move: { x: 0, y: 0 }, sprint: false, sequence: 0 };
     const move = normalize(controller.move);
     const sprint = controller.sprint && player.energy > 0.05;
-    const speed = sprint ? SPRINT_SPEED : PLAYER_SPEED;
+    const speed = movementSpeedForPlayer(player, sprint);
     player.vx = move.x * speed;
     player.vy = move.y * speed;
     player.x = clamp(player.x + player.vx * dt, SOCCER_PLAYER_RADIUS, SOCCER_FIELD_WIDTH - SOCCER_PLAYER_RADIUS);

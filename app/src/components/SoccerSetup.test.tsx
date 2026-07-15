@@ -11,7 +11,7 @@ describe("SoccerSetup", () => {
     host = null;
   });
 
-  it("starts with Coral Comets, quick play, and five-a-side selected", async () => {
+  it("starts with Ranger Squad, quick play, and five-a-side selected", async () => {
     host = document.createElement("div");
     document.body.append(host);
     const onStart = vi.fn();
@@ -22,10 +22,12 @@ describe("SoccerSetup", () => {
     await act(async () => start?.click());
 
     expect(onStart).toHaveBeenCalledWith({ team: "coral", format: "quick", teamSize: 5 });
+    expect(host.textContent).toContain("Ranger Squad");
+    expect(host.textContent).toContain("Wild Herd");
     await act(async () => root.unmount());
   });
 
-  it("allows a player to select the teal multiplayer team and compact format", async () => {
+  it("allows a player to select the Wild Herd multiplayer team and compact format", async () => {
     host = document.createElement("div");
     document.body.append(host);
     const onStart = vi.fn();

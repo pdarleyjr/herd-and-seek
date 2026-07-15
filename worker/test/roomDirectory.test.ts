@@ -73,7 +73,7 @@ describe("RoomDirectoryDurableObject", () => {
     expect(response.status).toBe(201);
     const payload = await responseJson<{ room: Record<string, unknown>; accessToken: string }>(response);
     expect(payload.room).toMatchObject({ name: "Moonlit Marsh", visibility: "private", maxPlayers: 6 });
-    expect(payload.room.roomId).toMatch(/^HSR-/);
+    expect(payload.room.roomId).toMatch(/^HSR-[A-Z2-9]{6}$/);
     expect(payload.accessToken.length).toBeGreaterThan(24);
     expect(JSON.stringify(payload)).not.toContain(password);
     expect(payload.room).not.toHaveProperty("passwordSalt");

@@ -14,7 +14,8 @@ async function startAnimal(page: Page, perk: string) {
   const durationSelect = page.getByLabel(/Solo round length/i);
   await durationSelect.selectOption("30");
   await expect(durationSelect).toHaveValue("30");
-  await page.getByRole("button", { name: /Start solo expedition/i }).click();
+  await page.getByRole("button", { name: /Review expedition/i }).click();
+  await page.getByRole("button", { name: /Start expedition/i }).click();
   const world = page.locator('[data-renderer="phaser"][data-scene="match"]');
   await expect(world).toHaveAttribute("data-phase", "PLAYING", { timeout: 20_000 });
   if (perk !== "extraLife") await expect(world).toHaveAttribute("data-perk", perk);

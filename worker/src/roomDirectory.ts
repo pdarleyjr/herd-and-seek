@@ -147,17 +147,17 @@ function summary(record: RoomDirectoryRecord): PublicRoomSummary {
 }
 
 function randomRoomId(records: Record<string, RoomDirectoryRecord>): string {
-  for (let attempt = 0; attempt < 16; attempt += 1) {
-    const bytes = randomBytes(8);
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const bytes = randomBytes(6);
     let code = "";
     for (const byte of bytes) code += ROOM_ALPHABET[byte % ROOM_ALPHABET.length];
     // HSR marks directory-managed IDs. If a record later expires, the
     // authorization path can still fail it closed without breaking legacy
     // explicit codes that pre-date room discovery.
-    const roomId = `HSR-${code.slice(0, 4)}-${code.slice(4)}`;
+    const roomId = `HSR-${code}`;
     if (!records[roomId]) return roomId;
   }
-  return `HSR-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+  throw new Error("room_code_capacity_exhausted");
 }
 
 async function requestBody(request: Request): Promise<Record<string, unknown> | null> {

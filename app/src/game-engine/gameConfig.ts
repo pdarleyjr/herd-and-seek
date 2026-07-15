@@ -7,7 +7,9 @@ import { PreloadScene, type GameSceneVariant } from "./scenes/PreloadScene";
 
 export function createGameConfig(parent: HTMLElement, bridge: GameBridge, variant: GameSceneVariant): Phaser.Types.Core.GameConfig {
   return {
-    type: Phaser.AUTO,
+    // The authored world is sprite/shape based; Canvas avoids software-WebGL
+    // stalls on school iPads and low-power browsers while preserving visuals.
+    type: Phaser.CANVAS,
     parent,
     width: parent.clientWidth || 1280,
     height: parent.clientHeight || 720,

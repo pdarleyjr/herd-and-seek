@@ -4,6 +4,7 @@ import {
   applyReward,
   applyPurchase,
   applySelect,
+  applySelectLoadout,
   applyAdminGrant,
   requireInternalRewardAuth,
   requireAdminKey,
@@ -25,6 +26,7 @@ import {
   collectibleInRange,
   boundedOpenWorldPosition,
   resolveReadyState,
+  districtAtPosition,
   type PlayerProfile,
   type QuestDefinition,
 } from "../src/index";
@@ -88,10 +90,14 @@ describe("authoritative perk rules", () => {
   });
 
   it("scales solo AI without changing normal difficulty", () => {
+    expect(difficultyMultiplier("beginner")).toBeLessThan(difficultyMultiplier("easy"));
     expect(difficultyMultiplier("easy")).toBeLessThan(1);
     expect(difficultyMultiplier("normal")).toBe(1);
     expect(difficultyMultiplier("hard")).toBeGreaterThan(1);
     expect(DIFFICULTY_TUNING.easy.shotCooldownMs).toBeGreaterThan(DIFFICULTY_TUNING.normal.shotCooldownMs);
+    expect(DIFFICULTY_TUNING.beginner.spawnGraceMs).toBeGreaterThan(DIFFICULTY_TUNING.easy.spawnGraceMs);
+    expect(DIFFICULTY_TUNING.beginner.intentionalMissChance).toBeGreaterThan(DIFFICULTY_TUNING.easy.intentionalMissChance);
+    expect(DIFFICULTY_TUNING.beginner.sightRange).toBeLessThan(DIFFICULTY_TUNING.easy.sightRange);
     expect(DIFFICULTY_TUNING.normal.shotCooldownMs).toBeGreaterThan(DIFFICULTY_TUNING.hard.shotCooldownMs);
     expect(DIFFICULTY_TUNING.hard.rewardMultiplier).toBeGreaterThan(DIFFICULTY_TUNING.normal.rewardMultiplier);
     expect(DIFFICULTY_TUNING.easy.humanHunterAmmo).toBeGreaterThan(DIFFICULTY_TUNING.hard.humanHunterAmmo);
@@ -279,6 +285,21 @@ describe("economy mutations and ledger", () => {
     expect(applySelect(p, "trail_leaf")).toBe(false);
     p.ownedCosmetics.push("trail_leaf");
     expect(applySelect(p, "trail_leaf")).toBe(true);
+  });
+
+  it("recognizes district discovery only inside an authoritative district radius", () => {
+    expect(districtAtPosition(3_000, 3_000)?.id).toBe("lodge");
+    expect(districtAtPosition(4_750, 4_450)?.id).toBe("wateringHole");
+    expect(districtAtPosition(-100, -100)).toBeNull();
+  });
+
+  it("uses migration-safe defaults and enforces species-compatible loadouts", () => {
+    const p = profile() as unknown as ProfileLike;
+    expect((p as any).loadout).toMatchObject({ hunterTool: "tracker_standard", animalSkins: {} });
+    p.ownedCosmetics.push("tool_tranquilizer", "skin_rabbit_moonfern");
+    expect(applySelectLoadout(p, { slot: "hunterTool", itemId: "tool_tranquilizer" })).toBe(true);
+    expect(applySelectLoadout(p, { slot: "animalSkin", species: "rabbit", itemId: "skin_rabbit_moonfern" })).toBe(true);
+    expect(applySelectLoadout(p, { slot: "animalSkin", species: "bear", itemId: "skin_rabbit_moonfern" })).toBe(false);
   });
 
   it("every reward writes a ledger entry", () => {

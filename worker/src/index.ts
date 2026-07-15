@@ -35,7 +35,8 @@ export function resolveReadyState(current: boolean, requested: boolean | undefin
   if (phase === "COUNTDOWN") return requested === false ? false : current;
   return current;
 }
-export type SoloDifficulty = "easy" | "normal" | "hard";
+export type SoloDifficulty = "beginner" | "easy" | "normal" | "hard";
+export type AnimalBotState = "idle" | "graze" | "wander" | "investigate" | "socialize" | "flee" | "hide" | "rest" | "returnToHerd";
 
 // Matches may never use the legacy global default room. Clients must always
 // connect with an explicit room id (multiplayer code, or a solo room id).
@@ -101,12 +102,19 @@ export interface PlayerState {
   botPatrolX?: number;
   botPatrolY?: number;
   botLastUpdate?: number;
+  botState?: AnimalBotState;
+  botStateUntil?: number;
+  botDestinationX?: number;
+  botDestinationY?: number;
+  botTargetId?: string;
+  botTargetLostAt?: number;
   perkActiveUntil?: number;
   perkCooldownUntil?: number;
   perkConsumed?: boolean;
   lastMoveAt?: number;
   lastMoveSequence?: number;
   lastShotAt?: number;
+  protectedUntil?: number;
 }
 
 const PERK_TIMING = {
@@ -168,12 +176,19 @@ export interface DifficultyTuning {
   humanHunterAmmo: number;
   aiHunterAmmo: number;
   rewardMultiplier: number;
+  reactionMs: number;
+  sightRange: number;
+  spawnGraceMs: number;
+  intentionalMissChance: number;
+  pursuitPersistenceMs: number;
+  acceleration: number;
 }
 
 export const DIFFICULTY_TUNING: Record<SoloDifficulty, DifficultyTuning> = {
-  easy: { movement: 0.72, animalDecisionMs: 1_550, animalDecisionJitterMs: 2_100, patrolChance: 0.72, patrolSpeed: 135, chaseSpeed: 175, shootRange: 215, shotCooldownMs: 5_200, shotSpread: 310, humanHunterAmmo: 14, aiHunterAmmo: 6, rewardMultiplier: 0.65 },
-  normal: { movement: 1, animalDecisionMs: 900, animalDecisionJitterMs: 1_450, patrolChance: 0.5, patrolSpeed: 185, chaseSpeed: 245, shootRange: 265, shotCooldownMs: 3_000, shotSpread: 155, humanHunterAmmo: 9, aiHunterAmmo: 9, rewardMultiplier: 1 },
-  hard: { movement: 1.38, animalDecisionMs: 380, animalDecisionJitterMs: 620, patrolChance: 0.2, patrolSpeed: 235, chaseSpeed: 325, shootRange: 335, shotCooldownMs: 1_350, shotSpread: 55, humanHunterAmmo: 6, aiHunterAmmo: 14, rewardMultiplier: 1.6 },
+  beginner: { movement: 0.52, animalDecisionMs: 2_200, animalDecisionJitterMs: 2_800, patrolChance: 0.84, patrolSpeed: 92, chaseSpeed: 132, shootRange: 175, shotCooldownMs: 7_500, shotSpread: 430, humanHunterAmmo: 18, aiHunterAmmo: 4, rewardMultiplier: 0.45, reactionMs: 1_850, sightRange: 470, spawnGraceMs: 8_000, intentionalMissChance: 0.7, pursuitPersistenceMs: 900, acceleration: 180 },
+  easy: { movement: 0.72, animalDecisionMs: 1_550, animalDecisionJitterMs: 2_100, patrolChance: 0.72, patrolSpeed: 135, chaseSpeed: 175, shootRange: 215, shotCooldownMs: 5_200, shotSpread: 310, humanHunterAmmo: 14, aiHunterAmmo: 6, rewardMultiplier: 0.65, reactionMs: 1_100, sightRange: 620, spawnGraceMs: 5_000, intentionalMissChance: 0.42, pursuitPersistenceMs: 1_600, acceleration: 240 },
+  normal: { movement: 1, animalDecisionMs: 900, animalDecisionJitterMs: 1_450, patrolChance: 0.5, patrolSpeed: 185, chaseSpeed: 245, shootRange: 265, shotCooldownMs: 3_000, shotSpread: 155, humanHunterAmmo: 9, aiHunterAmmo: 9, rewardMultiplier: 1, reactionMs: 620, sightRange: 820, spawnGraceMs: 3_000, intentionalMissChance: 0.15, pursuitPersistenceMs: 2_600, acceleration: 340 },
+  hard: { movement: 1.38, animalDecisionMs: 380, animalDecisionJitterMs: 620, patrolChance: 0.2, patrolSpeed: 235, chaseSpeed: 325, shootRange: 335, shotCooldownMs: 1_350, shotSpread: 55, humanHunterAmmo: 6, aiHunterAmmo: 14, rewardMultiplier: 1.6, reactionMs: 240, sightRange: 1_100, spawnGraceMs: 1_500, intentionalMissChance: 0.02, pursuitPersistenceMs: 4_500, acceleration: 520 },
 };
 
 export function difficultyMultiplier(difficulty: SoloDifficulty): number {
@@ -277,6 +292,8 @@ export interface WorldEvent {
   description: string;
   endsAt: number;
   rewardMultiplier?: number;
+  districtId: DistrictId;
+  kind: "migration" | "supplyRush" | "moonfernBloom";
 }
 
 export interface OpenWorldZoneState {
@@ -388,6 +405,18 @@ const DISTRICTS: { id: DistrictId; cx: number; cy: number; spread: number }[] = 
   { id: "strikerField", cx: 4750, cy: 3000, spread: 480 },
 ];
 
+function worldEventForDate(today: string): WorldEvent {
+  const variants: Array<Omit<WorldEvent, "id" | "endsAt">> = [
+    { kind: "migration", districtId: "grasslands", title: "Great Herd Crossing", description: "Follow the migrating herd for bonus field finds.", rewardMultiplier: 1.5 },
+    { kind: "supplyRush", districtId: "ridgeTrail", title: "Ridge Supply Rush", description: "Fresh ranger supplies have appeared around Ember Ridge.", rewardMultiplier: 1.35 },
+    { kind: "moonfernBloom", districtId: "moonfernForest", title: "Moonfern Bloom", description: "Rare moonferns are glowing until the daily reset.", rewardMultiplier: 1.4 },
+  ];
+  const random = seededPrng(`world-event:${today}`);
+  const selected = variants[Math.floor(random() * variants.length)];
+  const endsAt = Date.parse(`${today}T00:00:00.000Z`) + 86_400_000;
+  return { ...selected, id: `event:${today}:${selected.kind}`, endsAt };
+}
+
 function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNode[] {
   const rnd = seededPrng(`${zoneId}:${dailySeed}`);
   const kinds: CollectibleNode["kind"][] = ["coin", "token", "supply", "track"];
@@ -421,7 +450,7 @@ function generateCollectibles(zoneId: ZoneId, dailySeed: string): CollectibleNod
 
 // ── Match-mode message types ─────────────────────────────────────────────────
 interface ClientMessage {
-  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "ACTIVATE_PERK" | "RESTART" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_CMD" | "LEAVE_ROOM" | "CLOSE_ROOM";
+  type: "READY" | "SYNC" | "SHOOT" | "SELECT_ANIMAL" | "SELECT_PERK" | "ACTIVATE_PERK" | "RESTART" | "SET_DURATION" | "START_SOLO" | "SELECT_LEVEL" | "ADMIN_AUTH" | "ADMIN_LOGOUT" | "ADMIN_CMD" | "LEAVE_ROOM" | "CLOSE_ROOM";
   payload?: {
     role?: "hunter" | "animal" | "random";
     botCount?: number;
@@ -457,6 +486,7 @@ interface OpenWorldClientMessage {
     | "QUEST_ACCEPT"
     | "QUEST_PROGRESS"
     | "QUEST_CLAIM"
+    | "FAST_TRAVEL"
     | "COLLECT_NODE";
   payload?: {
     zoneId?: ZoneId;
@@ -468,6 +498,7 @@ interface OpenWorldClientMessage {
     questId?: QuestId;
     amount?: number;
     nodeId?: string;
+    districtId?: DistrictId;
     evidence?: unknown;
   };
 }
@@ -503,6 +534,7 @@ export interface PlayerProfile {
   badges: number;
   ownedCosmetics: string[];
   selectedCosmetic: string | null;
+  loadout: import("./economy").LoadoutProfile;
   unlockedAbilities: string[];
   questProgress: Record<string, QuestProgress>;
   dailyQuestDate: string;
@@ -511,6 +543,7 @@ export interface PlayerProfile {
     lastX: number;
     lastY: number;
     discoveredZones: ZoneId[];
+    discoveredDistricts: DistrictId[];
     collectedNodeIds: string[];
   };
   stats: {
@@ -565,6 +598,8 @@ import {
   applyReward,
   applyPurchase,
   applySelect,
+  applySelectLoadout,
+  ensureProfileDefaults,
   applyAdminGrant,
   requireInternalRewardAuth,
   requireAdminKey,
@@ -586,8 +621,10 @@ export class PlayerProfileDurableObject implements DurableObject {
     if (!profile) {
       profile = newProfile(userId, username ?? "Anonymous") as PlayerProfile;
       await this.ctx.storage.put("profile", profile);
-    } else if (username && username !== profile.username) {
-      profile.username = username;
+    } else {
+      ensureProfileDefaults(profile);
+      profile.openWorld.discoveredDistricts ??= ["lodge"];
+      if (username && username !== profile.username) profile.username = username;
     }
     return profile;
   }
@@ -645,6 +682,16 @@ export class PlayerProfileDurableObject implements DurableObject {
       const body = (await request.json().catch(() => ({}))) as { cosmeticId?: string | null };
       if (!applySelect(profile, body.cosmeticId ?? null)) {
         return new Response(JSON.stringify({ error: "not_owned", profile }), { status: 400, headers: JSON_HEADERS });
+      }
+      await this.save(profile);
+      return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
+    }
+
+    // Public: equip a purchased fictional tool or a species-compatible skin.
+    if (action === "select-loadout" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as import("./economy").LoadoutSelection;
+      if (!applySelectLoadout(profile, body)) {
+        return new Response(JSON.stringify({ error: "invalid_loadout", profile }), { status: 400, headers: JSON_HEADERS });
       }
       await this.save(profile);
       return new Response(JSON.stringify(profile), { headers: JSON_HEADERS });
@@ -840,6 +887,10 @@ export class GameRoomDurableObject implements DurableObject {
       this.handleAdminAuth(ws, connectionId, userId, attachment.username, parsed.payload?.adminKey);
       return;
     }
+    if (parsed.type === "ADMIN_LOGOUT") {
+      this.adminConns.delete(connectionId);
+      return;
+    }
     if (parsed.type === "ADMIN_CMD") {
       this.handleAdminCommand(ws, connectionId, userId, parsed.payload ?? {});
       return;
@@ -944,7 +995,7 @@ export class GameRoomDurableObject implements DurableObject {
           else if (parsed.payload?.role === "animal") role = "animal";
           else role = "random";
           const botCount = parsed.payload?.botCount ?? 4;
-          const difficulty = parsed.payload?.difficulty === "easy" || parsed.payload?.difficulty === "hard" ? parsed.payload.difficulty : "normal";
+          const difficulty = parsed.payload?.difficulty === "beginner" || parsed.payload?.difficulty === "easy" || parsed.payload?.difficulty === "hard" ? parsed.payload.difficulty : "normal";
           this.startSoloMatch(userId, role, botCount, difficulty);
         }
         break;
@@ -1095,6 +1146,8 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.players.forEach((player) => { player.isReady = false; });
     this.state.countdownEndsAt = null;
     this.state.matchStartTime = Date.now();
+    const protectionMs = this.state.isSoloMode ? DIFFICULTY_TUNING[this.state.soloDifficulty].spawnGraceMs : 1_500;
+    this.state.players.forEach((player) => { if (!player.isHunter) player.protectedUntil = this.state.matchStartTime + protectionMs; });
     this.broadcast({ type: "MATCH_START", payload: this.serializeState() });
     this.notifyDirectory();
     this.startSyncLoop();
@@ -1113,7 +1166,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.ammo -= 1;
     let hitPlayer: PlayerState | null = null;
     for (const p of this.state.players) {
-      if (p.isHunter || !p.isAlive) continue;
+      if (p.isHunter || !p.isAlive || (p.protectedUntil ?? 0) > now) continue;
       const dx = targetX - p.x; const dy = targetY - p.y;
       if (Math.sqrt(dx * dx + dy * dy) <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; }
     }
@@ -1307,7 +1360,7 @@ export class GameRoomDurableObject implements DurableObject {
     this.state.players.forEach((p) => {
       p.isHunter = false; p.isReady = false; p.isAlive = true; p.perk = "none"; p.extraLifeUsed = false;
       p.perkActiveUntil = 0; p.perkCooldownUntil = 0; p.perkConsumed = false;
-      p.lastMoveAt = undefined; p.lastMoveSequence = undefined; p.lastShotAt = undefined;
+      p.lastMoveAt = undefined; p.lastMoveSequence = undefined; p.lastShotAt = undefined; p.protectedUntil = 0;
     });
   }
   serializeState() {
@@ -1317,12 +1370,16 @@ export class GameRoomDurableObject implements DurableObject {
         id: p.id, username: p.username, x: p.x, y: p.y, animalType: p.animalType, isHunter: p.isHunter,
         isReady: p.isReady, isAlive: p.isAlive, perk: p.perk, extraLifeUsed: p.extraLifeUsed, isBot: p.isBot ?? false,
         perkActiveUntil: p.perkActiveUntil ?? 0, perkCooldownUntil: p.perkCooldownUntil ?? 0, perkConsumed: p.perkConsumed ?? false,
+        protectedUntil: p.protectedUntil ?? 0, aiState: p.isBot ? p.botState ?? (p.isHunter ? "investigate" : "idle") : undefined,
         connectionStatus: "connected" as const, joinedAt: this.state.createdAt, lastSeenAt: Date.now(),
       })),
       npcSeeds: this.state.npcSeeds, hunterId: this.state.hunterId, ammo: this.state.ammo, maxAmmo: this.state.maxAmmo,
       timeRemaining: this.state.timeRemaining, matchDuration: this.state.matchDuration, winner: this.state.winner,
       eventLog: this.state.eventLog, levelId: this.state.levelId,
       hostUserId: this.state.hostUserId, maxPlayers: this.state.maxPlayers, countdownEndsAt: this.state.countdownEndsAt,
+      soloDifficulty: this.state.isSoloMode ? this.state.soloDifficulty : undefined,
+      aiSightRange: this.state.isSoloMode ? DIFFICULTY_TUNING[this.state.soloDifficulty].sightRange : undefined,
+      serverTime: Date.now(),
     };
   }
   broadcast(msg: ServerMessage) {
@@ -1395,17 +1452,17 @@ export class GameRoomDurableObject implements DurableObject {
       human.isHunter = true;
       const animalBots = Math.max(2, botCount - 1);
       for (let i = 0; i < animalBots; i++) {
-        this.state.players.push({ id: `bot_animal_${i}_${Date.now()}`, username: `Animal ${i + 1}`, x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length], isHunter: false, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: (Math.random() - 0.5) * 5, botVy: (Math.random() - 0.5) * 5, botLastDecision: 0, botLastShot: 0 });
+        this.state.players.push({ id: `bot_animal_${i}_${Date.now()}`, username: `Animal ${i + 1}`, x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length], isHunter: false, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: 0, botVy: 0, botLastDecision: 0, botLastShot: 0, botState: "idle", botStateUntil: 0 });
       }
       this.state.hunterId = human.id;
     } else {
       human.isHunter = false;
       const botId = `bot_hunter_${Date.now()}`;
-      this.state.players.push({ id: botId, username: "🤖 AI Hunter", x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: defaultAnimalForLevel(this.state.levelId), isHunter: true, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: 0, botVy: 0, botLastDecision: 0, botLastShot: 0 });
+      this.state.players.push({ id: botId, username: "AI Ranger", x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: defaultAnimalForLevel(this.state.levelId), isHunter: true, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: 0, botVy: 0, botLastDecision: 0, botLastShot: 0, botState: "investigate" });
       this.state.hunterId = botId;
       const animalBots = Math.max(2, botCount - 1);
       for (let i = 0; i < animalBots; i++) {
-        this.state.players.push({ id: `bot_animal_${i}_${Date.now()}`, username: `Animal ${i + 1}`, x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length], isHunter: false, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: (Math.random() - 0.5) * 5, botVy: (Math.random() - 0.5) * 5, botLastDecision: 0, botLastShot: 0 });
+        this.state.players.push({ id: `bot_animal_${i}_${Date.now()}`, username: `Animal ${i + 1}`, x: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, y: Math.floor(Math.random() * (WORLD_SIZE - 300)) + 150, animalType: BOT_ANIMAL_TYPES[i % BOT_ANIMAL_TYPES.length], isHunter: false, isReady: true, isAlive: true, perk: "none", extraLifeUsed: false, isBot: true, botVx: 0, botVy: 0, botLastDecision: 0, botLastShot: 0, botState: "idle", botStateUntil: 0 });
       }
     }
     human.isAlive = true; human.isReady = false; human.extraLifeUsed = false;
@@ -1433,28 +1490,89 @@ export class GameRoomDurableObject implements DurableObject {
     const lastUpdate = bot.botLastUpdate ?? nowMs;
     const dt = Math.min((nowMs - lastUpdate) / 1000, 0.1);
     bot.botLastUpdate = nowMs;
-
     const tuning = DIFFICULTY_TUNING[this.state.soloDifficulty];
-    const lastDecision = bot.botLastDecision ?? 0;
-    if (nowMs - lastDecision > tuning.animalDecisionMs + Math.random() * tuning.animalDecisionJitterMs) {
-      bot.botLastDecision = nowMs;
-      const hunter = this.state.players.find((player) => player.isHunter && player.isAlive);
-      const threatDistance = hunter ? Math.hypot(bot.x - hunter.x, bot.y - hunter.y) : Infinity;
-      const evasive = !!hunter && threatDistance < (this.state.soloDifficulty === "hard" ? 820 : this.state.soloDifficulty === "normal" ? 620 : 420);
-      const away = hunter ? Math.atan2(bot.y - hunter.y, bot.x - hunter.x) : 0;
-      const angle = evasive ? away + (Math.random() - 0.5) * (this.state.soloDifficulty === "hard" ? 0.45 : 1.15) : Math.random() * Math.PI * 2;
-      const speed = (205 + Math.random() * 55) * tuning.movement;
-      bot.botVx = Math.cos(angle) * speed;
-      bot.botVy = Math.sin(angle) * speed;
-      const pauseChance = this.state.soloDifficulty === "easy" ? 0.22 : this.state.soloDifficulty === "hard" ? 0.025 : 0.09;
-      if (!evasive && Math.random() < pauseChance) { bot.botVx = 0; bot.botVy = 0; }
+    const hunter = this.state.players.find((player) => player.isHunter && player.isAlive);
+    const threatDistance = hunter ? Math.hypot(bot.x - hunter.x, bot.y - hunter.y) : Infinity;
+    const fleeRange = tuning.sightRange * (this.state.soloDifficulty === "hard" ? 0.78 : 0.62);
+    const arrived = bot.botDestinationX !== undefined && bot.botDestinationY !== undefined
+      && Math.hypot(bot.botDestinationX - bot.x, bot.botDestinationY - bot.y) < 38;
+
+    if (hunter && threatDistance < fleeRange && (bot.botState !== "flee" || nowMs >= (bot.botStateUntil ?? 0))) {
+      const away = Math.atan2(bot.y - hunter.y, bot.x - hunter.x) + (Math.random() - 0.5) * 0.7;
+      this.setBotDestination(bot, "flee", bot.x + Math.cos(away) * 620, bot.y + Math.sin(away) * 620, nowMs + 1_200 + Math.random() * 1_200);
+    } else if (arrived || nowMs >= (bot.botStateUntil ?? 0) || bot.botDestinationX === undefined) {
+      this.chooseAnimalBotState(bot, nowMs);
     }
-    const vx = bot.botVx ?? 0;
-    const vy = bot.botVy ?? 0;
-    bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + vx * dt));
-    bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + vy * dt));
-    if (bot.x <= 60 || bot.x >= WORLD_SIZE - 60) bot.botVx = -(bot.botVx ?? 0);
-    if (bot.y <= 60 || bot.y >= WORLD_SIZE - 60) bot.botVy = -(bot.botVy ?? 0);
+
+    let desiredX = 0;
+    let desiredY = 0;
+    const destinationX = bot.botDestinationX ?? bot.x;
+    const destinationY = bot.botDestinationY ?? bot.y;
+    const dx = destinationX - bot.x;
+    const dy = destinationY - bot.y;
+    const distance = Math.hypot(dx, dy);
+    const resting = bot.botState === "idle" || bot.botState === "graze" || bot.botState === "rest";
+    if (!resting && distance > 12) {
+      const stateSpeed = bot.botState === "flee" ? 1.28 : bot.botState === "socialize" || bot.botState === "returnToHerd" ? 0.72 : 0.88;
+      const speed = (205 + (bot.id.length % 5) * 8) * tuning.movement * stateSpeed;
+      desiredX = dx / distance * speed;
+      desiredY = dy / distance * speed;
+    }
+
+    for (const neighbor of this.state.players) {
+      if (neighbor === bot || !neighbor.isBot || neighbor.isHunter || !neighbor.isAlive) continue;
+      const separateX = bot.x - neighbor.x;
+      const separateY = bot.y - neighbor.y;
+      const separation = Math.hypot(separateX, separateY);
+      if (separation > 0 && separation < 115) {
+        const pressure = (115 - separation) * 2.2;
+        desiredX += separateX / separation * pressure;
+        desiredY += separateY / separation * pressure;
+      }
+    }
+
+    const maxChange = tuning.acceleration * dt;
+    bot.botVx = approach(bot.botVx ?? 0, desiredX, maxChange);
+    bot.botVy = approach(bot.botVy ?? 0, desiredY, maxChange);
+    const nextX = bot.x + (bot.botVx ?? 0) * dt;
+    const nextY = bot.y + (bot.botVy ?? 0) * dt;
+    bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, nextX));
+    bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, nextY));
+    if (bot.x !== nextX || bot.y !== nextY) {
+      bot.botStateUntil = 0;
+      bot.botVx = 0;
+      bot.botVy = 0;
+    }
+  }
+
+  private chooseAnimalBotState(bot: PlayerState, nowMs: number): void {
+    const roll = Math.random();
+    const others = this.state.players.filter((player) => player !== bot && player.isBot && !player.isHunter && player.isAlive);
+    if (roll < 0.16) return this.setBotDestination(bot, "graze", bot.x, bot.y, nowMs + 1_600 + Math.random() * 2_200);
+    if (roll < 0.28) return this.setBotDestination(bot, "rest", bot.x, bot.y, nowMs + 1_200 + Math.random() * 1_900);
+    if (roll < 0.43 && others.length) {
+      const friend = others[Math.floor(Math.random() * others.length)];
+      return this.setBotDestination(bot, "socialize", friend.x + (Math.random() - 0.5) * 150, friend.y + (Math.random() - 0.5) * 150, nowMs + 2_000 + Math.random() * 2_400);
+    }
+    if (roll < 0.56 && others.length) {
+      const center = others.reduce((sum, player) => ({ x: sum.x + player.x, y: sum.y + player.y }), { x: 0, y: 0 });
+      return this.setBotDestination(bot, "returnToHerd", center.x / others.length, center.y / others.length, nowMs + 2_200 + Math.random() * 2_000);
+    }
+    if (roll < 0.68 && this.state.npcSeeds.length) {
+      const cover = this.state.npcSeeds[Math.floor(Math.random() * this.state.npcSeeds.length)];
+      return this.setBotDestination(bot, "hide", cover.x, cover.y, nowMs + 2_400 + Math.random() * 2_400);
+    }
+    const angle = Math.random() * Math.PI * 2;
+    const range = 220 + Math.random() * 520;
+    this.setBotDestination(bot, roll < 0.83 ? "investigate" : "wander", bot.x + Math.cos(angle) * range, bot.y + Math.sin(angle) * range, nowMs + 2_300 + Math.random() * 3_000);
+  }
+
+  private setBotDestination(bot: PlayerState, state: AnimalBotState, x: number, y: number, until: number): void {
+    bot.botState = state;
+    bot.botStateUntil = until;
+    bot.botDestinationX = Math.max(80, Math.min(WORLD_SIZE - 80, x));
+    bot.botDestinationY = Math.max(80, Math.min(WORLD_SIZE - 80, y));
+    bot.botLastDecision = Date.now();
   }
   updateBotHunter(bot: PlayerState, nowMs: number) {
     const lastUpdate = bot.botLastUpdate ?? nowMs;
@@ -1463,43 +1581,84 @@ export class GameRoomDurableObject implements DurableObject {
 
     const targets = this.state.players.filter((p) => !p.isHunter && p.isAlive);
     if (targets.length === 0) return;
-    let nearest = targets[0]; let nearestDist = Infinity;
-    for (const t of targets) { const d = Math.hypot(t.x - bot.x, t.y - bot.y); if (d < nearestDist) { nearestDist = d; nearest = t; } }
-    const lastDecision = bot.botLastDecision ?? 0;
     const tuning = DIFFICULTY_TUNING[this.state.soloDifficulty];
-    if (nowMs - lastDecision > tuning.animalDecisionMs * 1.6 + Math.random() * tuning.animalDecisionJitterMs) {
-      bot.botLastDecision = nowMs; bot.botPatrolling = Math.random() < tuning.patrolChance;
-      if (bot.botPatrolling) {
-        const angle = Math.random() * Math.PI * 2; const range = 300 + Math.random() * 500;
+    const graceActive = nowMs < this.state.matchStartTime + tuning.spawnGraceMs;
+    let nearest = targets[0];
+    let nearestDist = Infinity;
+    for (const target of targets) {
+      const distance = Math.hypot(target.x - bot.x, target.y - bot.y);
+      if (distance < nearestDist) { nearestDist = distance; nearest = target; }
+    }
+
+    const visible = nearestDist <= tuning.sightRange && !graceActive;
+    if (visible) {
+      bot.botTargetId = nearest.id;
+      bot.botTargetLostAt = undefined;
+    } else if (bot.botTargetId && bot.botTargetLostAt === undefined) {
+      bot.botTargetLostAt = nowMs;
+    } else if (bot.botTargetLostAt && nowMs - bot.botTargetLostAt > tuning.pursuitPersistenceMs) {
+      bot.botTargetId = undefined;
+      bot.botTargetLostAt = undefined;
+    }
+
+    const pursued = targets.find((target) => target.id === bot.botTargetId);
+    const lastDecision = bot.botLastDecision ?? 0;
+    if (graceActive || (!pursued && nowMs - lastDecision >= tuning.reactionMs)) {
+      bot.botLastDecision = nowMs;
+      bot.botPatrolling = true;
+      bot.botState = graceActive ? "investigate" : "wander";
+      if (!bot.botPatrolX || Math.hypot(bot.botPatrolX - bot.x, bot.botPatrolY! - bot.y) < 70 || Math.random() < 0.22) {
+        const angle = Math.random() * Math.PI * 2;
+        const range = 260 + Math.random() * 560;
         bot.botPatrolX = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.cos(angle) * range));
         bot.botPatrolY = Math.max(80, Math.min(WORLD_SIZE - 80, WORLD_SIZE / 2 + Math.sin(angle) * range));
       }
+    } else if (pursued && nowMs - lastDecision >= tuning.reactionMs) {
+      bot.botLastDecision = nowMs;
+      bot.botPatrolling = false;
+      bot.botState = "investigate";
     }
-    const PATROL_SPEED = tuning.patrolSpeed; const CHASE_SPEED = tuning.chaseSpeed;
-    let moveX: number, moveY: number, moveDist: number, speed: number;
-    if (bot.botPatrolling) {
-      const px = bot.botPatrolX ?? WORLD_SIZE / 2; const py = bot.botPatrolY ?? WORLD_SIZE / 2;
-      moveX = px - bot.x; moveY = py - bot.y; moveDist = Math.hypot(moveX, moveY); speed = PATROL_SPEED;
-    } else { moveX = nearest.x - bot.x; moveY = nearest.y - bot.y; moveDist = nearestDist; speed = CHASE_SPEED; }
+
+    const chaseTarget = pursued && !graceActive ? pursued : null;
+    const destinationX = chaseTarget?.x ?? bot.botPatrolX ?? WORLD_SIZE / 2;
+    const destinationY = chaseTarget?.y ?? bot.botPatrolY ?? WORLD_SIZE / 2;
+    const moveX = destinationX - bot.x;
+    const moveY = destinationY - bot.y;
+    const moveDist = Math.hypot(moveX, moveY);
+    const speed = chaseTarget ? tuning.chaseSpeed : tuning.patrolSpeed;
     if (moveDist > 15) {
-      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + (moveX / moveDist) * speed * dt));
-      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + (moveY / moveDist) * speed * dt));
+      const desiredVx = moveX / moveDist * speed;
+      const desiredVy = moveY / moveDist * speed;
+      bot.botVx = approach(bot.botVx ?? 0, desiredVx, tuning.acceleration * dt);
+      bot.botVy = approach(bot.botVy ?? 0, desiredVy, tuning.acceleration * dt);
+      bot.x = Math.max(60, Math.min(WORLD_SIZE - 60, bot.x + bot.botVx * dt));
+      bot.y = Math.max(60, Math.min(WORLD_SIZE - 60, bot.y + bot.botVy * dt));
+    } else {
+      bot.botVx = approach(bot.botVx ?? 0, 0, tuning.acceleration * dt);
+      bot.botVy = approach(bot.botVy ?? 0, 0, tuning.acceleration * dt);
     }
+
     const lastShot = bot.botLastShot ?? 0;
-    if (!bot.botPatrolling && nearestDist < tuning.shootRange && this.state.ammo > 0 && nowMs - lastShot > tuning.shotCooldownMs) {
+    const targetDistance = chaseTarget ? Math.hypot(chaseTarget.x - bot.x, chaseTarget.y - bot.y) : Infinity;
+    if (chaseTarget && targetDistance < tuning.shootRange && this.state.ammo > 0 && nowMs - lastShot > tuning.shotCooldownMs) {
       bot.botLastShot = nowMs;
       const leadSeconds = this.state.soloDifficulty === "hard" ? 0.28 : this.state.soloDifficulty === "normal" ? 0.12 : 0;
-      const predictedX = nearest.x + (nearest.botVx ?? 0) * leadSeconds;
-      const predictedY = nearest.y + (nearest.botVy ?? 0) * leadSeconds;
-      const errorX = (Math.random() - 0.5) * tuning.shotSpread; const errorY = (Math.random() - 0.5) * tuning.shotSpread;
+      const predictedX = chaseTarget.x + (chaseTarget.botVx ?? 0) * leadSeconds;
+      const predictedY = chaseTarget.y + (chaseTarget.botVy ?? 0) * leadSeconds;
+      const intentionalMiss = Math.random() < tuning.intentionalMissChance;
+      const missDirection = Math.random() * Math.PI * 2;
+      const missDistance = PLAYER_COLLISION_RADIUS + 45 + Math.random() * Math.max(80, tuning.shotSpread);
+      const errorX = intentionalMiss ? Math.cos(missDirection) * missDistance : (Math.random() - 0.5) * tuning.shotSpread;
+      const errorY = intentionalMiss ? Math.sin(missDirection) * missDistance : (Math.random() - 0.5) * tuning.shotSpread;
       this.handleBotShoot(predictedX + errorX, predictedY + errorY);
     }
   }
   handleBotShoot(targetX: number, targetY: number) {
     if (this.state.phase !== "PLAYING" || this.state.ammo <= 0 || !Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
     this.state.ammo -= 1;
+    const now = Date.now();
     let hitPlayer: PlayerState | null = null;
-    for (const p of this.state.players) { if (p.isHunter || !p.isAlive) continue; const d = Math.hypot(targetX - p.x, targetY - p.y); if (d <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; } }
+    for (const p of this.state.players) { if (p.isHunter || !p.isAlive || (p.protectedUntil ?? 0) > now) continue; const d = Math.hypot(targetX - p.x, targetY - p.y); if (d <= PLAYER_COLLISION_RADIUS) { hitPlayer = p; break; } }
     if (hitPlayer) {
       if (hitPlayer.perk === "extraLife" && !hitPlayer.extraLifeUsed) {
         hitPlayer.animalType = randomAnimalExcept(hitPlayer.animalType, animalsForLevel(this.state.levelId));
@@ -1534,6 +1693,8 @@ interface OWPlayer {
   connId: string;
   lastSyncAt: number;
   lastCollectAt: Record<string, number>; // nodeId -> timestamp (recently collected)
+  discoveredDistricts: DistrictId[];
+  lastFastTravelAt: number;
 }
 
 interface OWState {
@@ -1572,11 +1733,13 @@ export class OpenWorldZoneDurableObject implements DurableObject {
 
   private async ensureDaily(): Promise<void> {
     const today = this.todaySeed();
-    if (this.state.dailySeed === today && this.state.collectibles.length > 0 && this.state.layoutVersion === OW_LAYOUT_VERSION) return;
+    const activeEventValid = (this.state.activeWorldEvent?.endsAt ?? 0) > Date.now();
+    if (this.state.dailySeed === today && this.state.collectibles.length > 0 && this.state.layoutVersion === OW_LAYOUT_VERSION && activeEventValid) return;
     this.state.dailySeed = today;
     this.state.collectibles = generateCollectibles("savannahReserve", today);
     this.state.lastResetDate = today;
     this.state.layoutVersion = OW_LAYOUT_VERSION;
+    this.state.activeWorldEvent = worldEventForDate(today);
     await this.ctx.storage.put("ow", this.state);
   }
 
@@ -1601,7 +1764,12 @@ export class OpenWorldZoneDurableObject implements DurableObject {
 
     const profile = await this.getProfile(userId, username);
     const existing = this.state.players.find((p) => p.id === userId);
-    if (existing) { existing.connId = connectionId; existing.lastSyncAt = Date.now(); }
+    if (existing) {
+      existing.connId = connectionId;
+      existing.lastSyncAt = Date.now();
+      existing.discoveredDistricts ??= profile?.openWorld.discoveredDistricts ?? ["lodge"];
+      existing.lastFastTravelAt ??= 0;
+    }
     else {
       const returning = profile?.openWorld.lastZoneId === zoneId;
       this.state.players.push({
@@ -1615,6 +1783,8 @@ export class OpenWorldZoneDurableObject implements DurableObject {
         connId: connectionId,
         lastSyncAt: Date.now(),
         lastCollectAt: {},
+        discoveredDistricts: profile?.openWorld.discoveredDistricts ?? ["lodge"],
+        lastFastTravelAt: 0,
       });
     }
     await this.ctx.storage.put("ow", this.state);
@@ -1659,7 +1829,30 @@ export class OpenWorldZoneDurableObject implements DurableObject {
         player.y = next.y;
         player.lastSyncAt = now;
         if (parsed.payload?.animalType) player.animalType = parsed.payload.animalType;
+        const district = districtAtPosition(player.x, player.y);
+        if (district && !player.discoveredDistricts.includes(district.id)) void this.discoverDistrict(player, district.id);
         void this.ctx.storage.put("ow", this.state);
+        break;
+      }
+      case "FAST_TRAVEL": {
+        const districtId = parsed.payload?.districtId;
+        const destination = DISTRICTS.find((district) => district.id === districtId);
+        const now = Date.now();
+        if (!destination || !districtId || !player.discoveredDistricts.includes(districtId)) {
+          this.sendTo(ws, { type: "OPEN_WORLD_ERROR", payload: { code: "district_locked", message: "Discover that district before fast travel." } });
+          break;
+        }
+        if (now - player.lastFastTravelAt < 10_000) {
+          this.sendTo(ws, { type: "OPEN_WORLD_ERROR", payload: { code: "travel_cooldown", message: "Fast travel is recharging." } });
+          break;
+        }
+        player.x = destination.cx;
+        player.y = destination.cy + 90;
+        player.lastSyncAt = now;
+        player.lastFastTravelAt = now;
+        void this.ctx.storage.put("ow", this.state);
+        void this.syncProfileMeta(player, { lastZoneId: "savannahReserve", lastX: player.x, lastY: player.y });
+        this.broadcastState();
         break;
       }
       case "OPEN_WORLD_LEAVE": {
@@ -1722,6 +1915,18 @@ export class OpenWorldZoneDurableObject implements DurableObject {
     if (this.state.players.length === 0 && this.broadcastInterval) { clearInterval(this.broadcastInterval); this.broadcastInterval = null; }
   }
   webSocketError(ws: WebSocket, _e: unknown): void { this.webSocketClose(ws, 0, "", false); }
+
+  private async discoverDistrict(player: OWPlayer, districtId: DistrictId): Promise<void> {
+    if (player.discoveredDistricts.includes(districtId)) return;
+    player.discoveredDistricts = [...player.discoveredDistricts, districtId];
+    const profile = await this.owSync(player.id, player.username, {
+      openWorld: { discoveredDistricts: player.discoveredDistricts, lastZoneId: "savannahReserve", lastX: player.x, lastY: player.y },
+      reward: { coins: 25, xp: 35, metadata: { source: "district_discovery", districtId } },
+    });
+    if (!profile) return;
+    this.sendToPlayer(player.id, { type: "REWARD_GRANTED", payload: { coins: 25, xp: 35, badges: 0, reason: `discover_${districtId}` } });
+    this.sendProfileSync(player.id, profile);
+  }
 
   // ── Profile bridge (always server-internal, signed with reward secret) ─────
   private async getProfile(userId: string, username: string): Promise<PlayerProfile | null> {
@@ -1881,6 +2086,20 @@ function clampOW(v: number): number {
   return Math.max(40, Math.min(OW_WORLD_SIZE - 40, v));
 }
 
+export function districtAtPosition(x: number, y: number): { id: DistrictId; cx: number; cy: number } | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const nearest = DISTRICTS
+    .map((district) => ({ ...district, distance: Math.hypot(x - district.cx, y - district.cy) }))
+    .sort((a, b) => a.distance - b.distance)[0];
+  return nearest && nearest.distance <= Math.max(310, nearest.spread * 0.62) ? nearest : null;
+}
+
+function approach(current: number, target: number, maxDelta: number): number {
+  if (current < target) return Math.min(target, current + maxDelta);
+  if (current > target) return Math.max(target, current - maxDelta);
+  return target;
+}
+
 export function boundedOpenWorldPosition(
   current: { x: number; y: number },
   requested: { x?: number; y?: number },
@@ -1901,6 +2120,10 @@ export function boundedOpenWorldPosition(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      return new Response(JSON.stringify({ ok: true, service: "herd-and-seek-backend", release: "tablet-overhaul-2026-07-14", now: Date.now() }), { headers: JSON_HEADERS });
+    }
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: JSON_HEADERS });

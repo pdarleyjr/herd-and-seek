@@ -1,0 +1,24 @@
+.soccer-game__kick {
+  position: absolute;
+  z-index: 39;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1.2rem, env(safe-area-inset-bottom));
+  width: 6.3rem;
+  aspect-ratio: 1;
+  border: 5px solid #fff5de;
+  border-radius: 50%;
+  background: #ee227de8;
+  color: #fff5de;
+  box-shadow: 0 0 0 4px #3b0855, 0 7px 0 #3b0855;
+  font: 1000 1rem "Arial Black", Nunito, sans-serif;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+.soccer-game[data-handedness="left"] .soccer-game__kick { right: auto; left: max(1rem, env(safe-area-inset-left)); }
+.soccer-game .touch-joystick { z-index: 39; }
+
+@media (pointer: fine) and (min-width: 900px) {
+  .soccer-game .touch-joystick,
+  .soccer-game__kick { display: none; }
+}

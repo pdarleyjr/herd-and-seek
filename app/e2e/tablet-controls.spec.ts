@@ -1,0 +1,30 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test } from "@playwright/test";
+
+test("tablet controls persist handedness and expose safe touch targets", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel(/Player name/i).fill(`Tablet-${Date.now()}`);
+  await page.getByRole("button", { name: /^PLAY$/i }).click();
+  await page.getByRole("button", { name: /^Controls$/i }).click();
+  await expect(page.getByRole("dialog", { name: /Control layout/i })).toBeVisible();
+  await page.getByRole("button", { name: /Left-handed/i }).click();
+  await page.getByRole("button", { name: /Floating start/i }).click();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
+  await page.getByRole("button", { name: /Close control settings/i }).click();
+  await page.reload();
+  await page.getByRole("button", { name: /^Controls$/i }).click();
+  await expect(page.getByRole("button", { name: /Left-handed/i })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: /Close control settings/i }).click();
+  await page.getByRole("button", { name: /Solo vs AI/i }).click();
+  await page.getByRole("button", { name: /^Animal Blend/i }).click();
+  await page.getByLabel(/Solo round length/i).selectOption("30");
+  await page.getByRole("button", { name: /Review expedition/i }).click();
+  await page.getByRole("button", { name: /Start expedition/i }).click();
+  const joystick = page.locator(".touch-joystick");
+  await expect(joystick).toBeVisible({ timeout: 20_000 });
+  const box = await joystick.boundingBox();
+  expect(box?.x).toBeGreaterThan(590);
+  expect(box?.width).toBeGreaterThanOrEqual(90);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(2);
+});

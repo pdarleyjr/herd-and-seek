@@ -7,7 +7,8 @@ test("Forest gameplay maintains the bounded performance tier", async ({ page }, 
   await page.getByRole("button", { name: /Solo vs AI/i }).click();
   await page.getByRole("button", { name: /^Animal Blend/i }).click();
   await page.getByLabel(/Solo round length/i).selectOption("30");
-  await page.getByRole("button", { name: /Start solo expedition/i }).click();
+  await page.getByRole("button", { name: /Review expedition/i }).click();
+  await page.getByRole("button", { name: /Start expedition/i }).click();
   const world = page.locator('[data-renderer="phaser"][data-scene="match"]');
   await expect(world).toHaveAttribute("data-phase", "PLAYING", { timeout: 20_000 });
   await expect(world).toHaveAttribute("data-fps", /\d/, { timeout: 10_000 });

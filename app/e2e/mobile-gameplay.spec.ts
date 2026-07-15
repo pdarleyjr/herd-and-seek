@@ -11,7 +11,8 @@ test("mobile Solo animal can enter Forest, move, and activate a perk", async ({ 
   await page.getByRole("button", { name: /^Animal Blend/i }).click();
   await page.getByLabel(/Solo perk/i).selectOption("sprint");
   await page.getByLabel(/Solo round length/i).selectOption("30");
-  await page.getByRole("button", { name: /Start solo expedition/i }).click();
+  await page.getByRole("button", { name: /Review expedition/i }).click();
+  await page.getByRole("button", { name: /Start expedition/i }).click();
 
   const world = page.locator('[data-scene="match"]');
   await expect(world).toHaveAttribute("data-phase", "PLAYING", { timeout: 20_000 });

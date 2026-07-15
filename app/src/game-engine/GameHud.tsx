@@ -10,12 +10,23 @@ interface GameHudProps {
 export default function GameHud({ state, player, eventLog, connection }: GameHudProps) {
   const isHunter = player?.isHunter ?? false;
   const ammoRatio = state.maxAmmo > 0 ? state.ammo / state.maxAmmo : 0;
+  const ranger = state.players.find((candidate) => candidate.isHunter && candidate.isAlive);
+  const rangerDistance = !isHunter && player && ranger ? Math.hypot(player.x - ranger.x, player.y - ranger.y) : Infinity;
+  const graceSeconds = Math.max(0, Math.ceil(((player?.protectedUntil ?? 0) - (state.serverTime ?? player?.protectedUntil ?? 0)) / 1000));
+  const danger = graceSeconds > 0
+    ? { level: "grace", label: `Head start · ${graceSeconds}s`, detail: "The ranger cannot tag you yet." }
+    : rangerDistance < 280
+      ? { level: "close", label: "Ranger close", detail: "Break line of sight and use cover." }
+      : rangerDistance < (state.aiSightRange ?? 720)
+        ? { level: "searching", label: "Ranger searching", detail: "Move quietly or change direction." }
+        : { level: "far", label: "Ranger far", detail: "Explore, collect clues, and stay alert." };
   return (
     <div className="safari-hud" aria-label="Game status">
       <section className="safari-hud__objective" aria-live="polite">
         <p className="safari-hud__eyebrow">Current objective</p>
-        <strong>{isHunter ? "Track the hidden herd" : "Blend in. Stay moving."}</strong>
-        <span>{isHunter ? "Aim with the pointer and make every round count." : "Survive until the ranger clock expires."}</span>
+        <strong>{isHunter ? "Track the hidden herd" : danger.label}</strong>
+        <span>{isHunter ? "Aim with the pointer and make every round count." : danger.detail}</span>
+        {!isHunter && <b className={`safari-hud__danger safari-hud__danger--${danger.level}`}>{danger.label}</b>}
       </section>
 
       <div className="safari-hud__timer" aria-label={`${state.timeRemaining} seconds remaining`}>

@@ -18,6 +18,7 @@ interface AdminPanelProps {
     extra?: { levelId?: LevelId; duration?: number; targetId?: string },
   ) => void;
   onClearDenied: () => void;
+  onLogout: () => void;
   revealSignal?: number;
 }
 
@@ -32,9 +33,11 @@ export default function AdminPanel({
   onAuth,
   onCommand,
   onClearDenied,
+  onLogout,
   revealSignal = 0,
 }: AdminPanelProps) {
   const [promptOpen, setPromptOpen] = useState(revealSignal > 0 && !authed);
+  const [dismissedRevealSignal, setDismissedRevealSignal] = useState(0);
   const [drawerHidden, setDrawerHidden] = useState(false);
   const [keyInput, setKeyInput] = useState("");
 
@@ -53,28 +56,40 @@ export default function AdminPanel({
   // The passphrase prompt is only rendered while unauthenticated; the drawer is
   // shown whenever authenticated and not manually hidden (no effect needed).
   const drawerOpen = authed && !drawerHidden;
+  const promptVisible = !authed && (promptOpen || revealSignal > dismissedRevealSignal);
+  const closePrompt = () => {
+    setPromptOpen(false);
+    setDismissedRevealSignal(revealSignal);
+    setKeyInput("");
+    onClearDenied();
+  };
 
   const submitAuth = () => {
     if (keyInput.trim()) {
       onClearDenied();
       onAuth(keyInput.trim());
+      setKeyInput("");
     }
   };
 
   return (
     <>
       {/* Passphrase prompt */}
-      {promptOpen && !authed && (
+      {promptVisible && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
-          onClick={() => setPromptOpen(false)}
+          role="presentation"
+          onClick={closePrompt}
         >
           <div
             className="w-full max-w-xs rounded-2xl border-2 border-[#8b5c1e] p-4"
             style={{ background: "linear-gradient(135deg,#2c1a0b,#140b04)" }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-access-title"
           >
-            <h3 className="text-[#f5d07a] font-bold text-sm mb-2">Admin Access</h3>
+            <h3 id="admin-access-title" className="text-[#f5d07a] font-bold text-lg mb-2">Admin Access</h3>
             <input
               type="password"
               value={keyInput}
@@ -86,7 +101,7 @@ export default function AdminPanel({
               style={{ touchAction: "manipulation" }}
             />
             {denied && (
-              <p className="text-[#ff6a5a] text-xs mt-1.5">Access denied.</p>
+              <p className="text-[#ff8a79] text-sm mt-2" role="alert">Access denied. Check the passphrase or ask the host to confirm the server admin secret.</p>
             )}
             <div className="flex gap-2 mt-3">
               <button
@@ -97,7 +112,7 @@ export default function AdminPanel({
                 Unlock
               </button>
               <button
-                onClick={() => setPromptOpen(false)}
+                onClick={closePrompt}
                 className="px-3 py-2 rounded-lg bg-[#5a3a1a] text-[#f5d07a] text-sm active:scale-95"
                 style={{ touchAction: "manipulation" }}
               >
@@ -110,17 +125,13 @@ export default function AdminPanel({
 
       {/* Admin drawer */}
       {authed && drawerOpen && (
-        <div className="fixed inset-y-0 right-0 z-50 w-[320px] max-w-[85vw] flex flex-col border-l-2 border-[#8b5c1e] shadow-2xl"
+        <aside className="fixed inset-0 z-50 w-full flex flex-col border-l-2 border-[#8b5c1e] shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:w-[360px] md:max-w-[42vw]"
           style={{ background: "linear-gradient(135deg,#241608,#0f0803)", touchAction: "manipulation" }}
+          aria-label="Admin Panel"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#5a3a1a]">
-            <h3 className="text-[#f5d07a] font-extrabold text-sm">🛠 Admin Panel</h3>
-            <button
-              onClick={() => setDrawerHidden(true)}
-              className="px-2 py-1 rounded bg-[#5a3a1a] text-[#f5d07a] text-xs active:scale-95"
-            >
-              Hide
-            </button>
+            <div><small className="text-[#c8a05a] uppercase tracking-widest">Authorized session</small><h3 className="text-[#f5d07a] font-extrabold text-lg">Admin Panel</h3></div>
+            <div className="flex gap-2"><button onClick={onLogout} className="min-h-11 px-3 py-2 rounded bg-[#7a2a1a] text-[#ffd0c0] text-xs font-bold active:scale-95">Log out</button><button onClick={() => setDrawerHidden(true)} className="min-h-11 px-3 py-2 rounded bg-[#5a3a1a] text-[#f5d07a] text-xs font-bold active:scale-95">Hide</button></div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-4">
@@ -200,7 +211,7 @@ export default function AdminPanel({
               </div>
             </section>
           </div>
-        </div>
+        </aside>
       )}
 
       {/* Collapsed re-open tab once authed */}
@@ -210,7 +221,7 @@ export default function AdminPanel({
           className="fixed bottom-3 right-3 z-50 px-3 py-2 rounded-full bg-[#8b5c1e] text-[#f5d07a] text-xs font-bold shadow-lg active:scale-95"
           style={{ touchAction: "manipulation" }}
         >
-          🛠 Admin
+          Admin
         </button>
       )}
     </>
@@ -229,7 +240,7 @@ function AdminButton({
   return (
     <button
       onClick={onClick}
-      className="px-2 py-1.5 rounded-lg text-[11px] font-bold border active:scale-95 select-none"
+      className="min-h-11 px-2 py-2 rounded-lg text-[11px] font-bold border active:scale-95 select-none"
       style={{
         borderColor: active ? "#7fff00" : "#5a3a1a",
         background: active ? "rgba(127,255,0,0.15)" : "rgba(42,24,8,0.8)",

@@ -253,6 +253,12 @@ export default function App() {
   });
 
   const handleAdminAuth = useCallback((key: string) => send({ type: "ADMIN_AUTH", payload: { adminKey: key } }), [send]);
+  const handleAdminLogout = useCallback(() => {
+    send({ type: "ADMIN_LOGOUT" });
+    setAdminAuthed(false);
+    setAdminDenied(false);
+    setAdminAuditLog([]);
+  }, [send]);
   const handleAdminCommand = useCallback(
     (command: AdminCommand, extra?: { levelId?: LevelId; duration?: number; targetId?: string }) =>
       send({ type: "ADMIN_CMD", payload: { command, ...extra } }),
@@ -400,7 +406,7 @@ export default function App() {
           <ShopModal userId={userId} username={username} profile={profile} onProfileChange={setProfile} onClose={() => setShowShop(false)} />
         )}
         <AdminPanel key={adminRevealSignal} authed={adminAuthed} denied={adminDenied} auditLog={adminAuditLog} gameState={gameState}
-          onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} revealSignal={adminRevealSignal} />
+          onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} onLogout={handleAdminLogout} revealSignal={adminRevealSignal} />
         {debugMode && <Diagnostics route={route} roomId={session.roomId} status={status} userId={userId}
           playerCount={gameState?.players.length ?? 0} phase={gameState?.phase ?? "—"} fps={fps} />}
       </>
@@ -465,7 +471,7 @@ export default function App() {
       )}
 
       <AdminPanel authed={adminAuthed} denied={adminDenied} auditLog={adminAuditLog} gameState={gameState}
-        onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} />
+        onAuth={handleAdminAuth} onCommand={handleAdminCommand} onClearDenied={() => setAdminDenied(false)} onLogout={handleAdminLogout} />
       {isDebug() && session && <Diagnostics route={route} roomId={session.roomId} status={status} userId={userId}
         playerCount={gameState?.players.length ?? 0} phase={gameState?.phase ?? "—"} fps={fps} />}
     </div>

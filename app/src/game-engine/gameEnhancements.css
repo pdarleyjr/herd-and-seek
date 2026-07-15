@@ -1,0 +1,49 @@
+.safari-hud__danger {
+  display: inline-flex;
+  margin-top: .4rem;
+  padding: .22rem .45rem;
+  border: 2px solid var(--plum);
+  border-radius: 7px;
+  background: var(--sun);
+  font-size: .58rem;
+  font-weight: 1000;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.safari-hud__danger--close { background: var(--pink); color: #fff; }
+.safari-hud__danger--searching { background: var(--coral); }
+.safari-hud__danger--far,
+.safari-hud__danger--grace { background: var(--lagoon); }
+
+@media (max-width: 700px) {
+  .safari-hud__danger { display: none; }
+}
+
+.game-controls-settings {
+  position: absolute;
+  z-index: 9;
+  right: max(.75rem, env(safe-area-inset-right));
+  top: max(15.5rem, calc(env(safe-area-inset-top) + 14.9rem));
+}
+
+.game-control-layer[data-handedness="left"] .game-action--fire,
+.game-control-layer[data-handedness="left"] .game-action--perk {
+  right: auto;
+  left: max(1rem, env(safe-area-inset-left));
+}
+
+.game-control-layer[data-handedness="left"] .game-action--perk {
+  left: max(6.9rem, calc(env(safe-area-inset-left) + 5.9rem));
+}
+
+@media (max-width: 700px) {
+  .game-controls-settings {
+    right: max(.65rem, env(safe-area-inset-right));
+    top: max(4.35rem, calc(env(safe-area-inset-top) + 3.75rem));
+  }
+}
+
+@media (pointer: fine) and (min-width: 900px) {
+  .touch-joystick { display: none; }
+}
