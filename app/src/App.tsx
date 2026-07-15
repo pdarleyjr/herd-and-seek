@@ -130,7 +130,7 @@ export default function App() {
 
   useEffect(() => {
     if (!navigator.userAgent.toLowerCase().includes("jsdom")) window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    document.querySelector<HTMLElement>(".mode-camp, .solo-camp")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector<HTMLElement>(".mode-camp, .solo-camp, .soccer-setup, .room-browser-shell")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [route.type]);
 
   useEffect(() => {

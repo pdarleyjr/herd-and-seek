@@ -28,6 +28,10 @@ export default defineConfig({
     { name: "tablet-portrait", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 820, height: 1180 } } },
     { name: "mobile-portrait", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
     { name: "mobile-landscape", testMatch: /visual\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 844, height: 390 } } },
+    { name: "responsive-source-dpr", testMatch: /responsive-regression\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1486, height: 776 }, deviceScaleFactor: 1.25 } },
+    { name: "responsive-laptop-short", testMatch: /responsive-regression\.spec\.ts/, use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 650 } } },
+    { name: "responsive-tablet-landscape", testMatch: /responsive-regression\.spec\.ts/, use: { ...devices["iPad Pro 11"], viewport: { width: 1180, height: 820 } } },
+    { name: "responsive-mobile-webkit", testMatch: /responsive-regression\.spec\.ts/, use: { ...devices["iPhone 13"], browserName: "webkit", viewport: { width: 390, height: 844 } } },
   ],
   webServer: process.env.E2E_BASE_URL ? undefined : [
     {
