@@ -245,4 +245,52 @@ describe("useOpenWorldSocket", () => {
       vi.useRealTimers();
     }
   });
+
+  it("retires the active socket while offline and reconnects immediately when the browser returns online", () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(window.navigator, "onLine", "get");
+    try {
+      online.mockReturnValue(true);
+      const { result, unmount } = renderHook(() =>
+        useOpenWorldSocket({ zoneId: "savannahReserve", userId: "u1", username: "Tester", animalType: "zebra" }),
+      );
+      const first = MockWebSocket.last!;
+      act(() => first.open());
+      expect(result.current.connected).toBe(true);
+
+      online.mockReturnValue(false);
+      act(() => window.dispatchEvent(new Event("offline")));
+      expect(first.readyState).toBe(MockWebSocket.CLOSED);
+      expect(result.current.connected).toBe(false);
+
+      online.mockReturnValue(true);
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+        vi.advanceTimersByTime(1);
+      });
+      expect(MockWebSocket.last).not.toBe(first);
+      expect(MockWebSocket.instances).toBe(2);
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces an open socket that stops receiving the server state stream", () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderHook(() =>
+        useOpenWorldSocket({ zoneId: "savannahReserve", userId: "u1", username: "Tester", animalType: "zebra" }),
+      );
+      const first = MockWebSocket.last!;
+      act(() => first.open());
+      act(() => vi.advanceTimersByTime(16_001));
+      expect(first.readyState).toBe(MockWebSocket.CLOSED);
+      expect(MockWebSocket.last).not.toBe(first);
+      expect(MockWebSocket.instances).toBe(2);
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
